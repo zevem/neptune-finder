@@ -20,6 +20,8 @@ actual host; see [performance](docs/performance.md).
 - Folder filtering and cancellable recursive filename search.
 - Bounded text and image Quick Look previews.
 - Properties: kind, dates, permissions, free space and a folder's item count and size.
+- Icon-view thumbnails for images, and on freedesktop.org desktops for videos
+  and documents the system has already thumbnailed.
 - Create, rename, copy, move and system trash, with existing destinations protected.
 - Default-app opening, reveal in the native file manager and Copy Path.
 - Graphite, Dusk and Light, nine accent choices, density and icon-size settings.

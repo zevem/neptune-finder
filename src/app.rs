@@ -4,6 +4,7 @@ use crate::{
     model::{Pane, Tab, Workspace},
     persistence::Storage,
     preview::{PreviewContent, Previews},
+    thumbnails::{self, Thumbnails},
     ui::{self, Action, Dialog, UiState},
     watch::Watches,
 };
@@ -25,6 +26,9 @@ pub struct FinderApp {
     operations: Operations,
     previews: Previews,
     inspector: Inspector,
+    thumbnails: Thumbnails,
+    /// The thumbnails the workers were last asked for.
+    thumbnail_requests: Vec<thumbnails::Key>,
     watches: Watches,
     storage: Storage,
     launch: Launch,
@@ -78,6 +82,8 @@ impl FinderApp {
         let wake = cc.egui_ctx.clone();
         let inspector = Inspector::new(move || wake.request_repaint());
         let wake = cc.egui_ctx.clone();
+        let thumbnails = Thumbnails::new(move || wake.request_repaint());
+        let wake = cc.egui_ctx.clone();
         let watches = Watches::new(move || wake.request_repaint());
         let config = Config::default();
         crate::theme::apply(&cc.egui_ctx, &config);
@@ -105,6 +111,8 @@ impl FinderApp {
             operations,
             previews,
             inspector,
+            thumbnails,
+            thumbnail_requests: Vec::new(),
             watches,
             storage,
             launch,
@@ -335,6 +343,9 @@ impl FinderApp {
             && result.generation == self.properties_generation
         {
             self.ui.properties = Some(result.result);
+        }
+        for thumbnail in self.thumbnails.poll() {
+            self.ui.thumbnails.insert(ctx, thumbnail);
         }
         if let Some(error) = self.storage.poll_error() {
             self.ui.notice = Some(ui::Notice::problem(error));
@@ -746,6 +757,13 @@ impl eframe::App for FinderApp {
             &mut self.ui,
             &mut actions,
         );
+        // Ask only when the files on screen change; each request replaces the
+        // queue, so files scrolled away are never read.
+        let wanted = self.ui.thumbnails.end_frame();
+        if wanted != self.thumbnail_requests {
+            self.thumbnails.request(&wanted);
+            self.thumbnail_requests = wanted;
+        }
         if self.initialized {
             for action in actions {
                 self.dispatch(action, &ctx);

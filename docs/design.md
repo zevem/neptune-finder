@@ -117,6 +117,9 @@ The window is composed as Terminal's is:
 - **Icon view.** Large glyphs over names of up to two lines. Selection backs
   the glyph with a soft tile and sets the name in an accent capsule. Only the
   glyph and name are the item; the space between items belongs to the folder.
+  A file with a thumbnail shows it in place of the glyph: centred in the
+  icon's square, never enlarged past its own pixels, 3-point corners, and a
+  hairline edge when opaque so a light picture keeps its shape on a light pane.
 - **Selection rectangle.** A drag from empty space draws a translucent accent
   rectangle with a one-pixel accent edge and a 4-point radius, clipped to the
   pane's files. In list view, a drag from a row's icon or name moves the file

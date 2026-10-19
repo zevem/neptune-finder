@@ -39,6 +39,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 notify = "8.2"
 tempfile = "3.27"
 
+# The freedesktop.org thumbnail repository names files by an MD5 of their URI.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+md-5 = "0.10"
+
 [build-dependencies]
 winresource = { version = "0.1.31", default-features = false }
 

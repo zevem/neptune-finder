@@ -46,7 +46,7 @@ OS-input tests sequentially because focus is shared.
 | Screen/state | Review |
 | --- | --- |
 | Directory list | Column alignment, long names, selection, sorting and visible-row rendering |
-| Icon view | Grid wrapping, names, multi-selection and scrolling |
+| Icon view | Grid wrapping, names, multi-selection, scrolling and thumbnails (images, cached video/document thumbnails, transparent, hidden and linked files) |
 | Split view and tabs | Independent navigation/selection, clear focus, narrow layout |
 | Search | Loading, empty/error results, cancellation and navigation away |
 | Quick Look | Bounded text/image previews, unsupported/binary files, error and dismissal |

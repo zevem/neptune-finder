@@ -8,6 +8,7 @@ pub mod path_serde;
 pub mod persistence;
 pub mod preview;
 pub mod theme;
+pub mod thumbnails;
 pub mod ui;
 pub mod watch;
 

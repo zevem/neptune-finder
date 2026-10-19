@@ -8,10 +8,13 @@ use crate::{
     icons::{self, Icon},
     model::{Band, Pane, Workspace},
     theme::{self, Palette, metrics},
+    thumbnails::{self, Texture},
 };
 use eframe::egui::{
     self, Align, Align2, Color32, CursorIcon, Galley, Layout, Pos2, Rangef, Rect, Response, Sense,
-    Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2,
+    Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo, WidgetType,
+    emath::GuiRounding,
+    pos2,
     scroll_area::{DragScroll, ScrollSource},
     style::ScrollAnimation,
     vec2,
@@ -892,6 +895,7 @@ fn grid(
     let width = available / columns as f32;
     let height = config.icon_size + 62.0;
     let rows = pane.entries.len().div_ceil(columns);
+    let pixels = thumbnails::pixels(config.icon_size, ui.ctx().pixels_per_point());
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt(("files-grid", pane.id, &pane.path, &pane.query))
         .auto_shrink([false, false])
@@ -956,7 +960,8 @@ fn grid(
                                 format!("{}, {}", entry.name, entry.kind_label()),
                             )
                         });
-                        item.paint(ui, &response, &entry, selected, focused, p);
+                        let thumbnail = state.thumbnails.get(&entry, pixels);
+                        item.paint(ui, &response, &entry, thumbnail, selected, focused, p);
                         items.push((bounds, index));
                         interact(ui, response, pane, (index, &entry), state, p, actions);
                     });
@@ -981,8 +986,9 @@ fn grid_tile(cell: Rect, size: f32) -> Rect {
     )
 }
 
-/// An icon over its name, as the native icon view draws it: selection backs
-/// the icon with a soft tile and sets the name in an accent capsule.
+/// An icon or thumbnail over its name, as the native icon view draws it:
+/// selection backs the picture with a soft tile and sets the name in an
+/// accent capsule.
 struct GridItem {
     tile: Rect,
     name: Arc<Galley>,
@@ -1034,11 +1040,13 @@ impl GridItem {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint(
         self,
         ui: &egui::Ui,
         response: &Response,
         entry: &Entry,
+        thumbnail: Option<&Texture>,
         selected: bool,
         focused: bool,
         p: Palette,
@@ -1052,8 +1060,12 @@ impl GridItem {
         if response.has_focus() {
             controls::focus_ring(painter, self.tile, 10, p);
         }
-        let (icon, ink) = file_icon(entry, p);
-        paint_icon(ui, entry, icon, ink, self.tile.shrink(6.0), p);
+        if let Some(thumbnail) = thumbnail {
+            paint_thumbnail(ui, entry, thumbnail, self.tile.shrink(6.0), p);
+        } else {
+            let (icon, ink) = file_icon(entry, p);
+            paint_icon(ui, entry, icon, ink, self.tile.shrink(6.0), p);
+        }
         if selected {
             painter.rect_filled(self.capsule, 5, if focused { p.accent } else { p.pressed });
         }
@@ -1240,6 +1252,49 @@ pub(super) fn paint_icon(
             ink
         },
     );
+    link_badge(ui, entry, rect, p);
+}
+
+/// The file's picture centred in the icon's square, never enlarged past its
+/// own pixels. Opaque pictures get a hairline edge so a light picture keeps
+/// its shape on a light pane.
+fn paint_thumbnail(ui: &egui::Ui, entry: &Entry, thumbnail: &Texture, rect: Rect, p: Palette) {
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let natural = thumbnail.handle.size_vec2() / pixels_per_point;
+    let scale = (rect.width() / natural.x)
+        .min(rect.height() / natural.y)
+        .min(1.0);
+    let size = natural * scale;
+    // Whole pixels keep a picture shown at its own size sharp.
+    let picture = Rect::from_min_size(
+        (rect.center() - size * 0.5).round_to_pixels(pixels_per_point),
+        size,
+    );
+    let tint = if entry.hidden {
+        Color32::WHITE.gamma_multiply(0.55)
+    } else {
+        Color32::WHITE
+    };
+    let painter = ui.painter();
+    painter.add(
+        egui::epaint::RectShape::filled(picture, 3, tint).with_texture(
+            thumbnail.handle.id(),
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        ),
+    );
+    if thumbnail.opaque {
+        painter.rect_stroke(picture, 3, p.hairline(), StrokeKind::Outside);
+    }
+    // The badge sits on the picture's corner, at the icon's badge size.
+    link_badge(
+        ui,
+        entry,
+        Rect::from_min_max(picture.right_bottom() - rect.size(), picture.right_bottom()),
+        p,
+    );
+}
+
+fn link_badge(ui: &egui::Ui, entry: &Entry, rect: Rect, p: Palette) {
     if matches!(entry.kind, EntryKind::Symlink | EntryKind::DirectoryLink) {
         let badge = Rect::from_center_size(
             rect.right_bottom() - vec2(rect.width() * 0.12, rect.height() * 0.12),

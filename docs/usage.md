@@ -21,7 +21,12 @@ either path bar to open it in a new tab.
 
 List view shows sortable file details; drag the dividers between column
 headers to resize them, or double-click one to restore the default widths.
-Icon view uses the same entries and selection with adjustable icon size.
+Icon view uses the same entries and selection with adjustable icon size, and
+shows thumbnails where it can: PNG, JPEG, GIF, WebP and BMP images are reduced
+on background workers, and on Linux and other freedesktop.org desktops a
+current thumbnail that another application (such as GNOME Files) already saved
+is reused, which covers videos, PDFs and other formats. Other files keep their
+kind glyph, and thumbnails appear as they finish.
 Folders appear first; hidden files are configurable. Each pane's path bar
 shows where it is and how many items it holds or has selected. The sidebar
 yields space in narrow windows; toggle it from the toolbar or with
