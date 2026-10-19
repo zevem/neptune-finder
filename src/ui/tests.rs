@@ -340,6 +340,129 @@ fn grid_arrow_navigation_uses_the_actual_visible_column_count() {
     assert_eq!(harness.workspace.pane().focus_index, Some(columns));
 }
 
+/// The list header's column dividers, leading to trailing: thin, header-high
+/// handles, unlike a scroll bar.
+fn column_dividers(harness: &Harness) -> Vec<Rect> {
+    let mut dividers: Vec<Rect> = harness
+        .ctx
+        .viewport_for(egui::ViewportId::ROOT, |viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, widgets)| widgets)
+                .filter(|widget| {
+                    widget.sense == egui::Sense::CLICK | egui::Sense::DRAG
+                        && widget.rect.width() < 12.0
+                        && widget.rect.height() <= 28.0
+                })
+                .map(|widget| widget.rect)
+                .collect()
+        });
+    dividers.sort_by(|a, b| a.left().total_cmp(&b.left()));
+    dividers
+}
+
+fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+#[test]
+fn column_dividers_follow_the_pointer_and_save_on_release() {
+    use crate::config::ColumnWidths;
+    let mut harness = Harness::new(20);
+    harness.warm();
+    let dividers = column_dividers(&harness);
+    assert_eq!(dividers.len(), 3, "Name, Date Modified, Size and Kind");
+    let start = dividers[1].center();
+    let mut actions = Vec::new();
+    actions.extend(
+        harness
+            .frame(vec![egui::Event::PointerMoved(start), pointer(start, true)])
+            .0,
+    );
+    // Date widens; Size gives way to its minimum, then Kind.
+    actions.extend(
+        harness
+            .frame(vec![egui::Event::PointerMoved(start + vec2(40.0, 0.0))])
+            .0,
+    );
+    let widths = harness.config.column_widths;
+    assert_eq!(
+        (widths.date, widths.size, widths.kind),
+        (208.0, 64.0, 124.0)
+    );
+    harness.frame(Vec::new());
+    assert_eq!(column_dividers(&harness)[1].center().x, start.x + 40.0);
+    // Returning within the same drag restores what it pushed.
+    actions.extend(harness.frame(vec![egui::Event::PointerMoved(start)]).0);
+    assert_eq!(harness.config.column_widths, ColumnWidths::default());
+    // Movement lands on whole pixels.
+    let end = start - vec2(20.6, 0.0);
+    actions.extend(harness.frame(vec![egui::Event::PointerMoved(end)]).0);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::PreferencesChanged | Action::Sort(..)))
+    );
+    let (released, _) = harness.frame(vec![pointer(end, false)]);
+    assert!(
+        released
+            .iter()
+            .any(|action| matches!(action, Action::PreferencesChanged))
+    );
+    let widths = harness.config.column_widths;
+    assert_eq!(
+        (widths.date, widths.size, widths.kind),
+        (147.0, 99.0, 150.0)
+    );
+
+    // A click on a divider never sorts; a double click restores the defaults.
+    harness.frame(Vec::new());
+    let divider = column_dividers(&harness)[1].center();
+    let mut clicks = Vec::new();
+    for pressed in [true, false, true, false] {
+        clicks.extend(harness.frame(vec![pointer(divider, pressed)]).0);
+    }
+    assert!(
+        !clicks
+            .iter()
+            .any(|action| matches!(action, Action::Sort(..)))
+    );
+    assert_eq!(harness.config.column_widths, ColumnWidths::default());
+}
+
+#[test]
+fn columns_give_way_so_names_stay_legible_in_narrow_panes() {
+    use crate::config::ColumnWidths;
+    let mut harness = Harness::new(20);
+    let wide = ColumnWidths {
+        date: 480.0,
+        size: 240.0,
+        kind: 480.0,
+    };
+    harness.config.column_widths = wide;
+    harness.warm();
+    // Date, the nearest to Name, gives way first; the saved widths remain.
+    let dividers = column_dividers(&harness);
+    assert_eq!(dividers.len(), 3);
+    assert_eq!(dividers[1].center().x - dividers[0].center().x, 160.0);
+    assert_eq!(dividers[2].center().x - dividers[1].center().x, 240.0);
+    assert_eq!(harness.config.column_widths, wide);
+    // Hidden columns take their dividers with them.
+    for (width, shown) in [(640.0, 2), (420.0, 1), (300.0, 0)] {
+        let size = vec2(width, 480.0);
+        harness.frame_at(Vec::new(), size, None);
+        harness.frame_at(Vec::new(), size, None);
+        assert_eq!(column_dividers(&harness).len(), shown, "{width}");
+    }
+}
+
 #[test]
 fn keyboard_focus_in_the_other_split_targets_that_panes_selection() {
     let mut harness = Harness::new(5);

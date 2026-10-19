@@ -106,9 +106,14 @@ The window is composed as Terminal's is:
   collapsing from the leading end, and what the folder holds or has selected.
 - **List view.** A 28-point header of Name, Date Modified, Size and Kind as
   room allows, hairline dividers, the sorted column in the foreground with its
-  chevron. Rows default to 28 points with faint alternating bands, a coloured
-  kind glyph, relative dates ("Today at 14:02") and kinds in words ("PNG
-  image", "Rust source"). Colour is decoration; the kind is always written.
+  chevron. Dragging a divider moves it under the pointer: the column it leaves
+  widens and those it moves toward give way, the nearest first. Name takes the
+  remaining width and keeps at least 120 points; Date Modified (96–480), Size
+  (64–240) and Kind (72–480) are saved on release, and a double click restores
+  168, 78 and 150. Rows default to 28 points with faint alternating bands, a
+  coloured kind glyph, relative dates ("Today at 14:02") and kinds in words
+  ("PNG image", "Rust source"). Colour is decoration; the kind is always
+  written.
 - **Icon view.** Large glyphs over names of up to two lines. Selection backs
   the glyph with a soft tile and sets the name in an accent capsule.
 - **Empty states** are a quiet glyph, a medium 14-point statement and one line
