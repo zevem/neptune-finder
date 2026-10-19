@@ -5,13 +5,20 @@
 //! New requests replace queued work and cancel in-flight enumeration. All I/O,
 //! filtering and sorting happens on the worker; the UI only exchanges owned
 //! snapshots. Recursive scans never follow symbolic links and have explicit
-//! result, traversal and depth budgets.
+//! result, traversal and depth budgets. An [`Inspector`] reads one item's
+//! properties the same way, counting a folder's contents within budgets.
 //!
 //! Enumeration is a read-only view of a changing filesystem, not a symlink
 //! security boundary: an external process can replace an inspected directory
 //! between its metadata lookup and opening its children. Mutating operations
 //! must validate their targets independently.
 
+mod properties;
+
+pub use properties::{
+    Access, Contents, Inspector, MAX_COUNTED_ENTRIES, PROGRESS_INTERVAL, Permissions, Properties,
+    PropertiesResult,
+};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs::{self, DirEntry, Metadata};
@@ -449,9 +456,14 @@ fn entry_from_directory(entry: DirEntry, name: String) -> std::io::Result<Entry>
     // DirEntry::metadata does not follow symlinks. Keep the original native
     // OsString in the path, including filenames that are not valid UTF-8.
     let metadata = entry.metadata()?;
+    Ok(entry_from_metadata(entry.path(), name, &metadata))
+}
+
+/// An entry from metadata that did not follow a final symbolic link.
+fn entry_from_metadata(path: PathBuf, name: String, metadata: &Metadata) -> Entry {
     let file_type = metadata.file_type();
     let kind = if file_type.is_symlink() {
-        if fs::metadata(entry.path()).is_ok_and(|target| target.is_dir()) {
+        if fs::metadata(&path).is_ok_and(|target| target.is_dir()) {
             EntryKind::DirectoryLink
         } else {
             EntryKind::Symlink
@@ -463,9 +475,9 @@ fn entry_from_directory(entry: DirEntry, name: String) -> std::io::Result<Entry>
     } else {
         EntryKind::Other
     };
-    let hidden = name.starts_with('.') || has_hidden_attribute(&metadata);
-    Ok(Entry {
-        path: entry.path(),
+    let hidden = name.starts_with('.') || has_hidden_attribute(metadata);
+    Entry {
+        path,
         name,
         kind,
         size: if matches!(kind, EntryKind::Directory | EntryKind::DirectoryLink) {
@@ -475,7 +487,7 @@ fn entry_from_directory(entry: DirEntry, name: String) -> std::io::Result<Entry>
         },
         modified: metadata.modified().ok(),
         hidden,
-    })
+    }
 }
 
 #[cfg(windows)]

@@ -14,7 +14,7 @@ requires [native acceptance](verification.md) on the actual operating systems.
 
 | Component | Owns | Must not own |
 | --- | --- | --- |
-| `finder-core` | Directory snapshots, entry kinds, sorting/filtering and recursive search | GUI types, GPU resources, native dialogs or interactive frames |
+| `finder-core` | Directory snapshots, entry kinds, sorting/filtering, recursive search and item properties | GUI types, GPU resources, native dialogs or interactive frames |
 | `finder-operations` | Copy, move, rename, creation, trash, collision checks and completion reporting | GUI widgets or implicit overwrite decisions |
 | `neptune-finder` desktop | Worker orchestration, navigation/selection model, tabs/panes, bounded previews, native services and settings/session persistence | Blocking filesystem work while painting |
 | `theme.rs`, `icons.rs`, `fonts.rs` | Neptune materials, geometry, typography, official icon fonts and shared controls | Filesystem or operation policy |
@@ -64,8 +64,9 @@ application undo in the current implementation. System trash is preferred for
 recoverable deletion. A failed trash request must remain a failure instead of
 falling back to permanent deletion.
 
-Search reads and desktop-owned previews (`src/preview.rs`) are bounded and
-superseded by newer requests. Symbolic links must not
+Search reads, desktop-owned previews (`src/preview.rs`) and Properties folder
+counts are bounded and superseded by newer requests; closing Properties
+cancels its count, which also stays on the folder's own volume. Symbolic links must not
 turn a recursive walk into a cycle, and a slow mount must not block a UI frame.
 Diagnostics exclude paths, names and contents. Saved sessions store navigation
 and settings, never operation queues or file contents. Saved path serialization

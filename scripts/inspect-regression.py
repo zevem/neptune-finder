@@ -317,6 +317,10 @@ class Review:
                 if not self.scenario("previews", self.previews):
                     self.close_sheet()
                     self.go(self.directory)
+                if not self.scenario("properties", self.properties):
+                    self.close_sheet()
+                    self.call("resize", 1180, 780)
+                    self.go(self.directory)
                 if not self.scenario("file-operations", self.file_operations):
                     self.close_sheet()
                     self.go(self.directory)
@@ -379,6 +383,32 @@ class Review:
         self.wait("image preview to finish", lambda: not self.has_text("Preparing preview…"))
         self.shot("08-image-quick-look")
         self.close_sheet()
+
+    def properties(self):
+        self.go(self.directory)
+        self.select("Welcome.md")
+        self.key("alt+Enter")
+        self.widget("Close properties", "button")
+        self.wait_text("Kind: Markdown document")
+        self.shot("08a-file-properties")
+        self.close_sheet()
+        self.click("Documents, ", prefix=True, secondary=True)
+        self.click("Properties")
+        self.widget("Close properties", "button")
+        self.wait("finished folder count", lambda: self.has_text("1 item, totalling 25 B") and not self.has_text("still counting"))
+        self.check("folder properties count nested items", self.has_text("1 item, totalling 25 B"), "Documents holds one 25-byte file in the fixture")
+        self.shot("08b-folder-properties")
+        self.close_sheet()
+        self.key("Escape")
+        self.command("i")
+        self.widget("Close properties", "button")
+        self.wait("finished current folder count", lambda: self.has_text("items, totalling") and not self.has_text("still counting"))
+        self.shot("08c-current-folder-properties")
+        self.call("resize", 640, 400)
+        self.widget("Close properties", "button")
+        self.shot("08d-narrow-properties")
+        self.close_sheet()
+        self.call("resize", 1180, 780)
 
     def file_operations(self):
         self.go(self.directory)

@@ -7,14 +7,16 @@ use crate::icons::{self, Icon};
 use crate::model::Workspace;
 use crate::theme::{self, Palette};
 use eframe::egui::{
-    self, Align, Align2, Color32, CursorIcon, Id, Layout, Rect, Sense, Stroke, StrokeKind, Ui,
-    Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    self, Align, Align2, Color32, CursorIcon, Id, Layout, Rect, Response, Sense, Stroke,
+    StrokeKind, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
+use finder_core::{Entry, EntryKind, Permissions, Properties};
 use finder_operations::{Operation, validate_name};
+use std::path::Path;
 
 pub fn show(
     ctx: &egui::Context,
-    _workspace: &mut Workspace,
+    workspace: &mut Workspace,
     config: &mut Config,
     state: &mut UiState,
     p: Palette,
@@ -319,6 +321,31 @@ pub fn show(
                 });
             close |= output.backdrop_clicked || (!opening && fresh_key(ctx, egui::Key::Space));
         }
+        Dialog::Properties { pane, entry } => {
+            // The pane's folder now, to offer its parent only when it differs.
+            let folder = workspace.find_mut(*pane).map(|pane| pane.path.clone());
+            let mut show_in_folder = false;
+            let output =
+                controls::sheet(ctx, p, "Properties", 440.0, SheetPlacement::Center, |ui| {
+                    close |= controls::sheet_header(ui, p, "", Some("Close properties"));
+                    scroll_body(ui, ctx, "properties-body", |ui| {
+                        show_in_folder = properties(
+                            ui,
+                            p,
+                            entry,
+                            state.properties.as_ref(),
+                            &state.home,
+                            folder.as_deref(),
+                        );
+                    });
+                    close |= confirmed(done_footer(ui, p, "Done", &mut state.focus_dialog));
+                });
+            close |= output.backdrop_clicked;
+            if show_in_folder {
+                actions.push(Action::ShowInFolder(*pane, entry.path.clone()));
+                close = true;
+            }
+        }
         Dialog::About => {
             let output = controls::sheet(
                 ctx,
@@ -375,6 +402,7 @@ pub fn show(
     }
     if close {
         state.preview = None;
+        state.properties = None;
     } else {
         state.dialog = Some(dialog);
     }
@@ -1029,4 +1057,468 @@ fn quick_look_header(ui: &mut Ui, p: Palette, path: &std::path::Path) -> bool {
         "quick-look-close",
         |ui| icons::button(ui, Icon::Close, "Close Quick Look").clicked(),
     )
+}
+
+/// The Properties sheet's body: the item's glyph and name over what it holds,
+/// then its details and permissions. Rows keep their place while the
+/// properties load. Returns whether "Open parent folder" was pressed.
+fn properties(
+    ui: &mut Ui,
+    p: Palette,
+    opened: &Entry,
+    read: Option<&Result<Properties, String>>,
+    home: &Path,
+    folder: Option<&Path>,
+) -> bool {
+    let loaded = read.and_then(|read| read.as_ref().ok());
+    let entry = loaded.map_or(opened, |loaded| &loaded.entry);
+    let contents = loaded.and_then(|loaded| loaded.contents);
+    let width = ui.available_width();
+    let (_, glyph) = ui.allocate_space(vec2(width, 64.0));
+    let (icon, ink) = super::content::file_icon(entry, p);
+    super::content::paint_icon(
+        ui,
+        entry,
+        icon,
+        ink,
+        Rect::from_center_size(glyph.center(), Vec2::splat(56.0)),
+        p,
+    );
+    ui.add_space(10.0);
+    let mut job =
+        egui::text::LayoutJob::simple(entry.name.clone(), theme::semibold(17.0), p.fg, width);
+    job.halign = Align::Center;
+    job.wrap = egui::text::TextWrapping {
+        max_width: width,
+        max_rows: 3,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = ui.painter().layout_job(job);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+    ui.painter().galley(
+        pos2(rect.center().x, rect.top()),
+        galley,
+        Color32::PLACEHOLDER,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &entry.name));
+    ui.add_space(6.0);
+    if let Some(Err(error)) = read {
+        ui.vertical_centered(|ui| body_text(ui, p, error));
+        return false;
+    }
+    let counting = entry.kind == EntryKind::Directory && !contents.is_some_and(|c| c.complete);
+    centered_line(
+        ui,
+        p,
+        &summary(entry, loaded),
+        theme::regular(13.0),
+        p.secondary,
+        counting,
+    );
+    let free = loaded
+        .and_then(|loaded| loaded.available_space)
+        .map(|space| format!("{} free", super::bytes(space)))
+        .unwrap_or_default();
+    centered_line(ui, p, &free, theme::regular(11.5), p.muted, false);
+    if let Some(note) = contents.and_then(count_note) {
+        centered_line(ui, p, note, theme::regular(11.5), p.muted, false);
+    }
+
+    // A value that has not loaded yet is a dash; one the system cannot give
+    // says so.
+    let missing = if loaded.is_some() {
+        "Unavailable"
+    } else {
+        "—"
+    };
+    let mut show_in_folder = false;
+    ui.add_space(14.0);
+    card(ui, p, "Details", true, |ui, rows| {
+        detail(ui, rows, p, "Kind", &super::content::kind(entry));
+        if let Some(parent) = entry.path.parent() {
+            let elsewhere = folder.is_some_and(|folder| folder != parent);
+            rows.row(ui, "Parent folder", |ui| {
+                if elsewhere {
+                    show_in_folder =
+                        icons::button(ui, Icon::FolderOpen, "Open parent folder").clicked();
+                    ui.add_space(4.0);
+                }
+                value(
+                    ui,
+                    p,
+                    "Parent folder",
+                    &super::display_path(parent, home),
+                    &parent.display().to_string(),
+                    true,
+                );
+            });
+        }
+        if matches!(entry.kind, EntryKind::Symlink | EntryKind::DirectoryLink) {
+            let target = loaded
+                .and_then(|loaded| loaded.link_target.as_ref())
+                .map_or_else(|| missing.to_owned(), |t| t.display().to_string());
+            rows.row(ui, "Link target", |ui| {
+                value(ui, p, "Link target", &target, &target, true)
+            });
+        }
+        let modified = date_time(entry.modified).unwrap_or_else(|| missing.into());
+        detail(ui, rows, p, "Modified", &modified);
+        let created = date_time(loaded.and_then(|loaded| loaded.created));
+        detail(
+            ui,
+            rows,
+            p,
+            "Created",
+            &created.unwrap_or_else(|| missing.into()),
+        );
+    });
+    card(ui, p, "Permissions", false, |ui, rows| {
+        for (label, text) in permission_rows(
+            loaded.and_then(|loaded| loaded.permissions.as_ref()),
+            entry.is_dir(),
+            missing,
+        ) {
+            detail(ui, rows, p, label, &text);
+        }
+    });
+    show_in_folder
+}
+
+/// One line of centred text, with a spinner after it while work continues.
+fn centered_line(
+    ui: &mut Ui,
+    p: Palette,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+    spinning: bool,
+) {
+    let width = ui.available_width();
+    let spinner = if spinning { 20.0 } else { 0.0 };
+    let galley = controls::elided(ui.painter(), text, font, color, width - spinner);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+    if !text.is_empty() {
+        // The spinner is visual only; text ending in "…" already says so.
+        let label = if spinning && !text.ends_with('…') {
+            format!("{text}, still counting")
+        } else {
+            text.to_owned()
+        };
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &label));
+    }
+    let left = rect.center().x - (galley.size().x + spinner) * 0.5;
+    let text_rect = controls::galley_at(ui.painter(), pos2(left, rect.center().y), galley);
+    if spinning {
+        let angle = ui.input(|input| input.time) as f32 * std::f32::consts::TAU;
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
+        icons::paint_rotated(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(text_rect.right() + 12.0, rect.center().y),
+                Vec2::splat(14.0),
+            ),
+            Icon::Loader2,
+            p.muted,
+            angle,
+        );
+    }
+}
+
+/// A labelled row with its value at the trailing edge.
+fn detail(ui: &mut Ui, rows: &mut controls::Group, p: Palette, label: &str, text: &str) {
+    rows.row(ui, label, |ui| value(ui, p, label, text, text, false));
+}
+
+/// A row's value, truncated visibly beside its label. A path keeps its last
+/// folders, as the path bar does. A truncated value shows `whole` in its
+/// tooltip.
+fn value(ui: &mut Ui, p: Palette, label: &str, text: &str, whole: &str, path: bool) -> Response {
+    let font = theme::regular(13.0);
+    let painter = ui.painter();
+    let label_width = painter
+        .layout_no_wrap(label.to_owned(), font.clone(), p.fg)
+        .size()
+        .x;
+    let room = ui.available_width() - label_width - 16.0;
+    let fits = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), font.clone(), p.secondary)
+            .size()
+            .x
+            <= room
+    };
+    let shown = if path && !fits(text) {
+        // Drop leading folders until the rest fits; the last name alone
+        // still truncates at its end.
+        text.match_indices(std::path::MAIN_SEPARATOR)
+            .filter(|(index, _)| *index > 0)
+            .map(|(index, _)| format!("…{}", &text[index..]))
+            .find(|tail| fits(tail))
+            .unwrap_or_else(|| text.to_owned())
+    } else {
+        text.to_owned()
+    };
+    let galley = controls::elided(painter, &shown, font, p.secondary, room);
+    let elided = galley.elided || shown != text;
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley, Color32::PLACEHOLDER);
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{label}: {text}")));
+    if elided || whole != text {
+        response.on_hover_text(whole)
+    } else {
+        response
+    }
+}
+
+/// What a folder holds, how large a file is, or otherwise what the item is.
+fn summary(entry: &Entry, loaded: Option<&Properties>) -> String {
+    match entry.kind {
+        EntryKind::Directory => match loaded.and_then(|loaded| loaded.contents) {
+            Some(contents) if contents.items == 0 && contents.complete && contents.partial => {
+                "No readable items".into()
+            }
+            Some(contents) if contents.items == 0 && contents.complete => "Empty folder".into(),
+            Some(contents) if contents.items > 0 => format!(
+                "{}{} item{}, totalling {}",
+                if contents.limited { "At least " } else { "" },
+                grouped(contents.items),
+                if contents.items == 1 { "" } else { "s" },
+                super::bytes(contents.bytes)
+            ),
+            _ => "Counting items…".into(),
+        },
+        EntryKind::File => file_size(entry.size),
+        _ => super::content::kind(entry),
+    }
+}
+
+/// Why a finished count may not be the whole folder.
+fn count_note(contents: finder_core::Contents) -> Option<&'static str> {
+    if contents.limited {
+        Some("Counting stopped at 1,000,000 items.")
+    } else if contents.partial && contents.complete {
+        Some("Some items could not be read, so the total may be incomplete.")
+    } else {
+        None
+    }
+}
+
+fn file_size(size: u64) -> String {
+    if size < 1000 {
+        format!("{size} byte{}", if size == 1 { "" } else { "s" })
+    } else {
+        format!("{} ({} bytes)", super::bytes(size), grouped(size))
+    }
+}
+
+/// A count with thousands separators, as "10,970".
+fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut text = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
+}
+
+/// A full local date and time, as "Oct 3, 2026 at 00:23:35".
+fn date_time(time: Option<std::time::SystemTime>) -> Option<String> {
+    time.map(|time| {
+        chrono::DateTime::<chrono::Local>::from(time)
+            .format("%b %-d, %Y at %H:%M:%S")
+            .to_string()
+    })
+}
+
+/// The Permissions card's rows, each `missing` until the permissions are known.
+fn permission_rows(
+    permissions: Option<&Permissions>,
+    folder: bool,
+    missing: &str,
+) -> Vec<(&'static str, String)> {
+    match permissions {
+        Some(Permissions::Unix {
+            mode,
+            owner,
+            group,
+            access,
+        }) => vec![
+            (
+                "Your access",
+                access_words(access.read, access.write, access.execute, folder),
+            ),
+            (
+                "Owner",
+                format!("{owner} · {}", class_words(*mode >> 6, folder)),
+            ),
+            (
+                "Group",
+                format!("{group} · {}", class_words(*mode >> 3, folder)),
+            ),
+            ("Others", class_words(*mode, folder)),
+            ("Mode", mode_text(*mode)),
+        ],
+        Some(Permissions::ReadOnly(readonly)) => {
+            vec![("Read-only", if *readonly { "Yes" } else { "No" }.into())]
+        }
+        None if cfg!(unix) => ["Your access", "Owner", "Group", "Others", "Mode"]
+            .into_iter()
+            .map(|label| (label, missing.to_owned()))
+            .collect(),
+        None => vec![("Read-only", missing.to_owned())],
+    }
+}
+
+/// The low three permission bits of `bits` in words.
+fn class_words(bits: u32, folder: bool) -> String {
+    access_words(bits & 4 != 0, bits & 2 != 0, bits & 1 != 0, folder)
+}
+
+/// Read, write and execute permission as Ubuntu Files names it: what a
+/// person may do in a folder, or with a file.
+fn access_words(read: bool, write: bool, execute: bool, folder: bool) -> String {
+    if folder {
+        return match (read, write, execute) {
+            (true, true, true) => "Create and delete files",
+            (true, _, true) => "Access files",
+            (true, _, false) => "List files only",
+            (false, true, true) => "Add files only",
+            (false, false, true) => "Open by name only",
+            (false, _, false) => "None",
+        }
+        .into();
+    }
+    let verbs = [(read, "read"), (write, "write"), (execute, "run")]
+        .into_iter()
+        .filter_map(|(allowed, verb)| allowed.then_some(verb))
+        .collect::<Vec<_>>();
+    let text = match verbs.as_slice() {
+        [] => return "None".into(),
+        [only] => format!("{only} only"),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// Permission bits as `ls` writes them, with their octal value.
+fn mode_text(mode: u32) -> String {
+    let mut text = String::with_capacity(16);
+    for (shift, special, mark) in [(6, 0o4000, 's'), (3, 0o2000, 's'), (0, 0o1000, 't')] {
+        let bits = (mode >> shift) & 7;
+        text.push(if bits & 4 != 0 { 'r' } else { '-' });
+        text.push(if bits & 2 != 0 { 'w' } else { '-' });
+        text.push(match (mode & special != 0, bits & 1 != 0) {
+            (true, true) => mark,
+            (true, false) => mark.to_ascii_uppercase(),
+            (false, true) => 'x',
+            (false, false) => '-',
+        });
+    }
+    format!("{text} ({:03o})", mode & 0o7777)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_sizes_and_modes_read_as_ubuntu_files_writes_them() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(10_970), "10,970");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+        assert_eq!(file_size(1), "1 byte");
+        assert_eq!(file_size(999), "999 bytes");
+        assert_eq!(file_size(999_312_345), "999.3 MB (999,312,345 bytes)");
+        assert_eq!(mode_text(0o644), "rw-r--r-- (644)");
+        assert_eq!(mode_text(0o755), "rwxr-xr-x (755)");
+        assert_eq!(mode_text(0o4755), "rwsr-xr-x (4755)");
+        assert_eq!(mode_text(0o1777), "rwxrwxrwt (1777)");
+        assert_eq!(mode_text(0o2640), "rw-r-S--- (2640)");
+        assert_eq!(mode_text(0o007), "------rwx (007)");
+    }
+
+    #[test]
+    fn access_is_said_in_words_for_files_and_folders() {
+        assert_eq!(
+            access_words(true, true, true, true),
+            "Create and delete files"
+        );
+        assert_eq!(access_words(true, false, true, true), "Access files");
+        assert_eq!(access_words(true, false, false, true), "List files only");
+        assert_eq!(access_words(false, false, false, true), "None");
+        assert_eq!(access_words(true, true, false, false), "Read and write");
+        assert_eq!(access_words(true, false, false, false), "Read only");
+        assert_eq!(access_words(true, true, true, false), "Read, write and run");
+        assert_eq!(access_words(false, false, false, false), "None");
+        assert_eq!(class_words(0o6, false), "Read and write");
+        assert_eq!(class_words(0o5, true), "Access files");
+    }
+
+    #[test]
+    fn a_folder_summary_follows_its_running_count() {
+        let entry = Entry {
+            path: "/home/neptune/Games".into(),
+            name: "Games".into(),
+            kind: EntryKind::Directory,
+            size: 0,
+            modified: None,
+            hidden: false,
+        };
+        assert_eq!(summary(&entry, None), "Counting items…");
+        let mut properties = Properties {
+            entry: entry.clone(),
+            created: None,
+            link_target: None,
+            permissions: None,
+            available_space: None,
+            contents: Some(finder_core::Contents::default()),
+        };
+        assert_eq!(summary(&entry, Some(&properties)), "Counting items…");
+        properties.contents = Some(finder_core::Contents {
+            items: 10_970,
+            bytes: 999_300_000,
+            ..Default::default()
+        });
+        assert_eq!(
+            summary(&entry, Some(&properties)),
+            "10,970 items, totalling 999.3 MB"
+        );
+        properties.contents = Some(finder_core::Contents {
+            complete: true,
+            ..Default::default()
+        });
+        assert_eq!(summary(&entry, Some(&properties)), "Empty folder");
+        let unreadable = finder_core::Contents {
+            complete: true,
+            partial: true,
+            ..Default::default()
+        };
+        properties.contents = Some(unreadable);
+        assert_eq!(summary(&entry, Some(&properties)), "No readable items");
+        assert!(count_note(unreadable).is_some());
+        let limited = finder_core::Contents {
+            items: 1_000_000,
+            complete: true,
+            limited: true,
+            ..Default::default()
+        };
+        properties.contents = Some(limited);
+        assert!(summary(&entry, Some(&properties)).starts_with("At least 1,000,000 items"));
+        assert!(count_note(limited).is_some());
+        assert_eq!(
+            permission_rows(None, true, "—").len(),
+            if cfg!(unix) { 5 } else { 1 }
+        );
+    }
 }

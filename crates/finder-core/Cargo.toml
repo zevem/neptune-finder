@@ -3,7 +3,12 @@ name = "finder-core"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Bounded, cancellable filesystem listings for Neptune Finder"
+description = "Bounded, cancellable filesystem listings and properties for Neptune Finder"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+# Only the native user, group, access and volume lookups; no default features,
+# so the workspace's existing libc build is reused unchanged.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", default-features = false }

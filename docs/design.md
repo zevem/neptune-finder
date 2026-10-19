@@ -132,6 +132,11 @@ The window is composed as Terminal's is:
   cards whose controls trail their rows. Themes are miniatures drawn in their
   own materials; accents are colour discs. Settings apply immediately, so
   there is no confirming action. A narrow sheet keeps the list as icons.
+- **Properties.** As Ubuntu Files shows them: the item's glyph and name over
+  what it holds, with a spinner while a folder is still counted, and the
+  volume's free space; then Details and Permissions cards whose values trail
+  their rows. Rows keep their place while properties load, and long values
+  truncate with the whole value in a tooltip.
 
 Long names truncate visibly and remain available in tooltips; long dialogs
 scroll instead of clipping their actions. Quick Look titles its sheet with the
@@ -140,7 +145,8 @@ file's name and sets text on an inset content surface.
 ## Native visual acceptance
 
 Inspect the running native app after the final build. Capture list, icon view,
-split view, search, Quick Look and affected dialogs/preferences in relevant
-themes and narrow windows. Check glyph/text alignment, density, contrast, focus,
-selection, scroll behavior, truncation and overlay containment. Screenshots of a
-mockup or passing widget tests do not establish native acceptance.
+split view, search, Quick Look, Properties and affected dialogs/preferences in
+relevant themes and narrow windows. Check glyph/text alignment, density,
+contrast, focus, selection, scroll behavior, truncation and overlay containment.
+Screenshots of a mockup or passing widget tests do not establish native
+acceptance.

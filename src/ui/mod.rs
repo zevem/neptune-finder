@@ -11,7 +11,7 @@ use crate::{
     theme::{self, Palette},
 };
 use eframe::egui::{self, Key, Modifiers, Rect, Stroke, StrokeKind, Vec2};
-use finder_core::SortField;
+use finder_core::{Entry, EntryKind, SortField};
 use finder_operations::Operation;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +38,10 @@ pub enum Action {
     CopyPath(PathBuf),
     Submit(Operation),
     QuickLook(PathBuf),
+    /// Show an item's properties; the pane is where the action began.
+    Properties(u64, Entry),
+    /// Open a pane at an item's parent folder with the item selected.
+    ShowInFolder(u64, PathBuf),
     Favorite(PathBuf),
     PreferencesChanged,
     View(ViewMode),
@@ -63,6 +67,11 @@ pub enum Dialog {
     Preferences,
     QuickLook {
         path: PathBuf,
+    },
+    /// The entry known when the sheet opened, shown until its properties load.
+    Properties {
+        pane: u64,
+        entry: Entry,
     },
     About,
 }
@@ -120,6 +129,8 @@ pub struct UiState {
     pub level: Option<crate::controls::Level>,
     pub dialog: Option<Dialog>,
     pub preview: Option<Preview>,
+    /// The newest properties read for the open Properties sheet.
+    pub properties: Option<Result<finder_core::Properties, String>>,
     pub brand_icon: Option<egui::TextureHandle>,
     pub busy: usize,
     pub can_paste: bool,
@@ -187,6 +198,7 @@ impl UiState {
             level: None,
             dialog: None,
             preview: None,
+            properties: None,
             brand_icon: None,
             busy: 0,
             can_paste: false,
@@ -541,6 +553,18 @@ fn keyboard(
     if take(ctx, command, Key::V) {
         actions.push(Action::Paste(workspace.pane().path.clone()));
     }
+    // Ubuntu Files' and Windows' Alt+Enter, and Finder's Get Info chord. The
+    // chorded Enter is taken before a plain Enter can open the item.
+    if take(ctx, Modifiers::ALT, Key::Enter) || take(ctx, command, Key::I) {
+        let pane = workspace.pane();
+        if let Some(entry) = pane.selected_entry() {
+            actions.push(Action::Properties(pane.id, entry.clone()));
+        } else if pane.selected.is_empty() {
+            actions.push(Action::Properties(pane.id, folder_entry(pane)));
+        } else {
+            state.notice = Some(Notice::info("Select one item to see its properties."));
+        }
+    }
     if take(ctx, command, Key::A) {
         workspace.pane_mut().selected = workspace
             .pane()
@@ -708,6 +732,29 @@ fn resize_edges(ui: &egui::Ui, bounds: Rect) {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
         }
+    }
+}
+
+/// The folder a pane shows, for actions on the folder itself. Its details
+/// arrive with the properties read.
+pub fn folder_entry(pane: &Pane) -> Entry {
+    let name = name(&pane.path);
+    Entry {
+        path: pane.path.clone(),
+        hidden: name.starts_with('.'),
+        name,
+        kind: EntryKind::Directory,
+        size: 0,
+        modified: None,
+    }
+}
+
+/// Properties' keyboard chord as the platform writes it.
+pub fn properties_shortcut() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "⌘I"
+    } else {
+        "Alt+Enter"
     }
 }
 
