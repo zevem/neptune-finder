@@ -22,8 +22,9 @@ cargo build -p neptune-finder --features inspection --locked --bin neptune-finde
 python3 scripts/inspect-regression.py --output artifacts/native-flow
 ```
 
-It asserts creation, rename, copy, compression and extraction only in temporary
-fixtures. The Trash confirmation is cancelled, never accepted. Captures, native
+It asserts creation, rename, copy, moves, their Undo and Redo, compression and
+extraction only in temporary fixtures. The Trash confirmation is cancelled, never
+accepted, and Undo stops before reversals that would use the OS Trash. Captures, native
 trees, logs and a truthful report remain under the selected output directory.
 Client events verify application routing; they do not substitute for native OS
 keyboard integration.

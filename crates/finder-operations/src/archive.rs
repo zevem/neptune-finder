@@ -7,8 +7,8 @@
 //! is never replaced or merged.
 
 use super::{
-    MAX_COPY_DEPTH, checked_directory, checked_item, checked_selection, describe, item_word,
-    new_child, platform, unchanged_metadata, validate_name,
+    MAX_COPY_DEPTH, checked_directory, checked_item, checked_selection, describe, history::Journal,
+    item_word, new_child, platform, unchanged_metadata, validate_name,
 };
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -42,6 +42,7 @@ pub(super) fn compress(
     sources: Vec<PathBuf>,
     destination: &Path,
     name: &str,
+    journal: &mut Journal,
 ) -> Result<String, String> {
     let target = new_child(destination, name)?;
     let destination = target
@@ -90,6 +91,7 @@ pub(super) fn compress(
     drop(file);
     platform::rename_noreplace(&payload, &target)
         .map_err(|error| describe("publish archive", &target, error))?;
+    journal.created(&target);
     Ok(match items.as_slice() {
         [(_, item)] => format!("Compressed {item} into {name}"),
         _ => format!(
@@ -234,7 +236,11 @@ fn entry_options(metadata: &Metadata) -> SimpleFileOptions {
     options
 }
 
-pub(super) fn extract(archive: &Path, destination: &Path) -> Result<String, String> {
+pub(super) fn extract(
+    archive: &Path,
+    destination: &Path,
+    journal: &mut Journal,
+) -> Result<String, String> {
     if !is_extractable(archive) {
         return Err(format!(
             "Only ZIP archives can be extracted: {}",
@@ -335,6 +341,7 @@ pub(super) fn extract(archive: &Path, destination: &Path) -> Result<String, Stri
     };
     let folder = fs::symlink_metadata(&source).is_ok_and(|metadata| metadata.is_dir());
     let target = publish(&source, &destination, &name, folder)?;
+    journal.created(&target);
     Ok(format!(
         "Extracted {}",
         target

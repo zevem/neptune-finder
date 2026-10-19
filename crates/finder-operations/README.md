@@ -35,7 +35,7 @@ actively written trees does not provide a filesystem snapshot. Directory
 ancestry validation and OS Trash handoffs remain path based and are not a
 security boundary against a malicious process concurrently replacing ancestor
 directories. Open writers are not locked; cross-filesystem originals remain
-recoverable in Trash. The service does not provide undo, permanent deletion,
+recoverable in Trash. The service does not provide permanent deletion,
 automatic overwrite, directory merging, archive formats other than ZIP, or
 editing an existing archive.
 
@@ -58,6 +58,20 @@ bits are not restored and folders stay writable by their owner. Symbolic links
 are recreated but never followed during extraction. A failure leaves no partial
 result. Extracted files are not flushed individually: the archive remains the
 recoverable original.
+
+Every change is journaled as it completes, so a completion carries a `Record`
+of what actually changed, including the completed part of a failed batch.
+`Operation::Reverse(record)` changes it back and reports a record of the
+reversal, which reverses it in turn (Redo). A reversal works item by item,
+newest first, and never replaces an existing item: an item that is gone, has
+been replaced by a different kind of item or whose earlier name is now taken is
+left in place and reported, while the others are still reversed. Moved and
+renamed items move back. Items an operation made (copies, new items, archives
+and extractions) go to the OS Trash; nothing is deleted permanently. Trashed
+items are restored from the freedesktop Trash on Linux, matched by file identity
+and deletion time, and from the Windows Recycle Bin by path and deletion time.
+Other systems report that Put Back must be used instead. Records hold paths, not
+file contents, and the service keeps no history of its own.
 
 Native Open and Reveal pass exact native paths as process arguments, without a
 shell. One shared sleeping reaper bounds live launcher processes and prevents

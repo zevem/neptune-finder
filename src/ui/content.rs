@@ -1847,6 +1847,8 @@ fn folder_menu(
         actions.push(Action::Paste(pane.path.clone()));
         ui.close();
     }
+    // As Windows Explorer offers it, beside Paste in a folder's own menu.
+    super::history_items(ui, p, state, actions);
     controls::menu_separator(ui, p);
     if controls::menu_item(ui, p, Icon::Pin, "Pin to sidebar", "", false) {
         actions.push(Action::Favorite(pane.path.clone()));

@@ -951,6 +951,26 @@
       "upstream_icon_version": "1.0"
     },
     {
+      "icon": "Undo",
+      "style": "outline",
+      "name": "arrow-back-up",
+      "file": "outline/arrow-back-up.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/a4ce1404bc6d24d3c365afe7b258d6bf6f48d62d/icons/outline/arrow-back-up.svg",
+      "unicode": "eb77",
+      "sha256": "42a20a833068ac155cc2e3a4176a9e80a918cc62c8bf48d3f826a2c47bde739d",
+      "upstream_icon_version": "1.3"
+    },
+    {
+      "icon": "Redo",
+      "style": "outline",
+      "name": "arrow-forward-up",
+      "file": "outline/arrow-forward-up.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/a4ce1404bc6d24d3c365afe7b258d6bf6f48d62d/icons/outline/arrow-forward-up.svg",
+      "unicode": "eb78",
+      "sha256": "fd66d62f72c9c638108fbb97738d9ca1f969b4cf2cb54ece6f79b44d586409ad",
+      "upstream_icon_version": "1.3"
+    },
+    {
       "icon": "FolderFilled",
       "style": "filled",
       "name": "folder",

@@ -74,7 +74,8 @@ python3 scripts/inspect-regression.py --output artifacts/native-flow
 
 The flow owns a unique loopback endpoint, process and temporary data/fixture
 folders. It drives the real app through accessible control bounds and egui input,
-asserts fixture create/rename/copy behavior, cancels the Trash confirmation, and
+asserts fixture create/rename/copy/move behavior and the Undo and Redo of moves,
+cancels the Trash confirmation, stops Undo before it would use the OS Trash, and
 captures list/grid/split/tabs, search, previews, dialogs, narrow layouts and all
 three themes. `report.json`, per-screen accessibility trees, screenshots and
 `app.log` are retained; failures are reported without claiming unobserved passes.
