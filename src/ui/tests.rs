@@ -933,12 +933,16 @@ fn search_editing_keeps_select_all_copy_and_cut_out_of_file_actions() {
 
 /// The centre of the widget AccessKit names `label` in the frame's output.
 fn widget_center(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+    widget_rect(output, label).map(|rect| rect.center())
+}
+
+fn widget_rect(output: &egui::FullOutput, label: &str) -> Option<Rect> {
     let update = output.platform_output.accesskit_update.as_ref()?;
     update.nodes.iter().find_map(|(_, node)| {
         let bounds = node.bounds().filter(|_| node.label() == Some(label))?;
-        Some(egui::pos2(
-            ((bounds.x0 + bounds.x1) * 0.5) as f32,
-            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        Some(Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         ))
     })
 }
@@ -2078,4 +2082,185 @@ fn the_info_panel_asks_for_a_larger_measured_picture_of_its_file_only() {
     harness.workspace.pane_mut().select(1, false, false);
     harness.frame(Vec::new());
     assert!(harness.state.info_picture.end_frame().is_none());
+}
+
+/// The Undo and Redo actions a frame emitted, in order.
+fn history(actions: &[Action]) -> Vec<&'static str> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Undo => Some("undo"),
+            Action::Redo => Some("redo"),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Presses and releases a chord, returning the Undo and Redo it asked for.
+fn chord(harness: &mut Harness, key_value: Key, modifiers: Modifiers) -> Vec<&'static str> {
+    let (actions, _) = harness.frame(vec![key(key_value, true, false, modifiers)]);
+    harness.frame(vec![key(key_value, false, false, modifiers)]);
+    history(&actions)
+}
+
+#[test]
+fn undo_and_redo_chords_reach_the_files_once_each() {
+    let mut harness = Harness::new(3);
+    harness.warm();
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    };
+    assert_eq!(chord(&mut harness, Key::Z, Modifiers::COMMAND), ["undo"]);
+    // The shifted chord is Redo alone, never also Undo.
+    assert_eq!(chord(&mut harness, Key::Z, shift), ["redo"]);
+    let windows_redo = chord(&mut harness, Key::Y, Modifiers::COMMAND);
+    if cfg!(target_os = "macos") {
+        assert!(windows_redo.is_empty());
+    } else {
+        assert_eq!(windows_redo, ["redo"]);
+    }
+    assert!(chord(&mut harness, Key::Z, Modifiers::NONE).is_empty());
+    // Like Copy and Paste, the chords still reach the files while a
+    // toolbar control holds keyboard focus.
+    let chrome = egui::Id::new("a-focused-chrome-control");
+    let (actions, _) = harness.frame_at(
+        vec![key(Key::Z, true, false, Modifiers::COMMAND)],
+        vec2(1_024.0, 720.0),
+        Some(chrome),
+    );
+    assert_eq!(history(&actions), ["undo"]);
+}
+
+#[test]
+fn a_focused_field_keeps_command_z_for_its_own_text() {
+    let mut harness = Harness::new(3);
+    harness.workspace.pane_mut().query = "needle".into();
+    harness.state.focus_search = true;
+    harness.warm();
+    assert!(harness.ctx.text_edit_focused());
+    assert!(chord(&mut harness, Key::Z, Modifiers::COMMAND).is_empty());
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    };
+    assert!(chord(&mut harness, Key::Z, shift).is_empty());
+}
+
+#[test]
+fn an_open_dialog_keeps_the_undo_chords_from_the_files() {
+    let mut harness = Harness::new(3);
+    harness.state.open_dialog(Dialog::New {
+        parent: harness.workspace.pane().path.clone(),
+        name: String::new(),
+        folder: true,
+    });
+    harness.warm();
+    assert!(chord(&mut harness, Key::Z, Modifiers::COMMAND).is_empty());
+    assert!(harness.state.dialog.is_some());
+}
+
+/// Clicks the widget AccessKit names `label`, returning the frame actions.
+fn click_widget(harness: &mut Harness, label: &str) -> Vec<Action> {
+    let (_, output) = harness.frame(Vec::new());
+    let at = widget_center(&output, label).unwrap_or_else(|| panic!("no widget {label:?}"));
+    let [press, release] = click_events(at);
+    harness.frame(press);
+    harness.frame(release).0
+}
+
+fn shown(harness: &mut Harness, label: &str) -> bool {
+    let (_, output) = harness.frame(Vec::new());
+    widget_center(&output, label).is_some()
+}
+
+#[test]
+fn the_more_menu_names_what_undo_and_redo_would_reverse() {
+    for reversible in [false, true] {
+        let mut harness = Harness::new(3);
+        harness.ctx.enable_accesskit();
+        if reversible {
+            harness.state.undo = Some("Undo move".into());
+            harness.state.redo = Some("Redo copy".into());
+        }
+        harness.warm();
+        click_widget(&mut harness, "More actions");
+        assert!(shown(&mut harness, "New folder…"), "the menu did not open");
+        assert_eq!(shown(&mut harness, "Redo copy"), reversible);
+        if reversible {
+            let actions = click_widget(&mut harness, "Undo move");
+            assert_eq!(history(&actions), ["undo"]);
+            assert!(!shown(&mut harness, "Redo copy"), "the menu stayed open");
+        } else {
+            assert!(!shown(&mut harness, "Undo move"));
+        }
+    }
+}
+
+#[test]
+fn a_short_window_scrolls_the_more_menu_below_its_button() {
+    let mut harness = Harness::new(3);
+    harness.ctx.enable_accesskit();
+    harness.state.undo = Some("Undo move".into());
+    harness.state.redo = Some("Redo copy".into());
+    // The smallest window Finder allows, where the menu holds every action.
+    let size = vec2(520.0, 360.0);
+    let mut frame = |events| harness.frame_at(events, size, None).1;
+    frame(Vec::new());
+    let button = widget_rect(&frame(Vec::new()), "More actions").unwrap();
+    for events in click_events(button.center()) {
+        frame(events);
+    }
+    frame(Vec::new());
+    let output = frame(Vec::new());
+    let first = widget_rect(&output, "Undo move").expect("the menu opened");
+    assert!(
+        first.top() >= button.bottom(),
+        "the menu covers its button: {first:?} over {button:?}"
+    );
+    let scrolled = |output: &egui::FullOutput| {
+        widget_rect(output, "About Neptune Finder").is_some_and(|last| last.bottom() <= size.y)
+    };
+    assert!(
+        !scrolled(&output),
+        "the menu fits; the test needs a taller menu"
+    );
+    frame(vec![
+        egui::Event::PointerMoved(first.center()),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -600.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    frame(Vec::new());
+    assert!(
+        scrolled(&frame(Vec::new())),
+        "the last item cannot be reached"
+    );
+}
+
+#[test]
+fn a_folders_own_menu_offers_undo_beside_paste() {
+    let mut harness = Harness::new(2);
+    harness.ctx.enable_accesskit();
+    harness.state.undo = Some("Undo move to Trash".into());
+    harness.warm();
+    let blank = egui::pos2(600.0, 520.0);
+    let secondary = |pressed| egui::Event::PointerButton {
+        pos: blank,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    harness.frame(vec![egui::Event::PointerMoved(blank), secondary(true)]);
+    harness.frame(vec![secondary(false)]);
+    assert!(
+        shown(&mut harness, "New folder…"),
+        "the folder menu did not open"
+    );
+    assert!(!shown(&mut harness, "Redo move to Trash"));
+    let actions = click_widget(&mut harness, "Undo move to Trash");
+    assert_eq!(history(&actions), ["undo"]);
 }

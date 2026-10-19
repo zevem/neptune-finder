@@ -10,6 +10,7 @@ pub mod preview;
 pub mod theme;
 pub mod thumbnails;
 pub mod ui;
+pub mod undo;
 pub mod watch;
 
 use std::path::PathBuf;

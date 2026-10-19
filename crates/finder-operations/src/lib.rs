@@ -4,11 +4,16 @@
 //! native no-replace rename. Existing items are never merged or overwritten.
 //! Moves across filesystems recycle their original only after publication.
 //! ZIP archives are built and extracted the same way, in private staging.
+//! Every change is journaled as it completes, so Undo can reverse it.
 
 mod archive;
+mod history;
 mod platform;
 
 pub use archive::is_extractable;
+pub use history::{Kind, Record};
+
+use history::{Bin, Journal, SystemBin};
 
 use std::collections::HashSet;
 use std::fs::{self, File, FileTimes, Metadata, OpenOptions};
@@ -64,12 +69,18 @@ pub enum Operation {
     Reveal {
         path: PathBuf,
     },
+    /// Reverse a record of completed work: Undo it, or Redo the record of an
+    /// Undo. The completion carries the record of this reversal.
+    Reverse(Record),
 }
 
 #[derive(Debug)]
 pub struct OperationResult {
     pub id: u64,
     pub result: Result<String, String>,
+    /// The completed changes Undo can reverse. A batch that failed part way
+    /// still records the items it changed.
+    pub record: Option<Record>,
 }
 
 struct Request {
@@ -100,12 +111,16 @@ impl Operations {
                     if worker_stopping.load(Ordering::Acquire) {
                         break;
                     }
-                    let result = std::panic::catch_unwind(|| execute(request.operation))
-                        .unwrap_or_else(|_| Err("The file operation stopped unexpectedly".into()));
+                    let (result, record) =
+                        std::panic::catch_unwind(|| run(request.operation, &SystemBin))
+                            .unwrap_or_else(|_| {
+                                (Err("The file operation stopped unexpectedly".into()), None)
+                            });
                     if completed
                         .send(OperationResult {
                             id: request.id,
                             result,
+                            record,
                         })
                         .is_err()
                     {
@@ -163,16 +178,31 @@ impl Drop for Operations {
 }
 
 pub fn execute(operation: Operation) -> Result<String, String> {
+    run(operation, &SystemBin).0
+}
+
+/// Perform an operation, returning its outcome and the record of what it
+/// changed, which is kept even when it failed part way.
+fn run(operation: Operation, bin: &dyn Bin) -> (Result<String, String>, Option<Record>) {
+    let kind = Kind::of(&operation);
+    let mut journal = Journal::default();
+    let result = apply(operation, bin, &mut journal);
+    (result, journal.finish(kind))
+}
+
+fn apply(operation: Operation, bin: &dyn Bin, journal: &mut Journal) -> Result<String, String> {
     validate_selection_size(&operation)?;
     match operation {
         Operation::CreateFolder { parent, name } => {
             let target = new_child(&parent, &name)?;
             fs::create_dir(&target).map_err(|error| describe("create folder", &target, error))?;
+            journal.created(&target);
             Ok(format!("Created folder {name}"))
         }
         Operation::CreateFile { parent, name } => {
             let target = new_child(&parent, &name)?;
             File::create_new(&target).map_err(|error| describe("create file", &target, error))?;
+            journal.created(&target);
             Ok(format!("Created file {name}"))
         }
         Operation::Rename { source, name } => {
@@ -188,25 +218,29 @@ pub fn execute(operation: Operation) -> Result<String, String> {
             ensure_absent(&target)?;
             platform::rename_noreplace(&source, &target)
                 .map_err(|error| describe("rename", &source, error))?;
+            journal.moved(&source, &target);
             Ok(format!("Renamed to {name}"))
         }
         Operation::Copy {
             sources,
             destination,
-        } => transfer(sources, destination, false),
+        } => transfer(sources, destination, false, bin, journal),
         Operation::Move {
             sources,
             destination,
-        } => transfer(sources, destination, true),
+        } => transfer(sources, destination, true, bin, journal),
         Operation::Trash { paths } => {
             let paths = checked_selection(paths)?;
             let total = paths.len();
             for (completed, path) in paths.iter().enumerate() {
-                if let Err(error) = trash::delete(path) {
-                    return Err(format!(
-                        "Moved {completed} of {total} items to Trash; could not recycle {}: {error}",
-                        path.display()
-                    ));
+                match bin.recycle(path) {
+                    Ok(ticket) => journal.trashed(path, ticket),
+                    Err(error) => {
+                        return Err(format!(
+                            "Moved {completed} of {total} items to Trash; could not recycle {}: {error}",
+                            path.display()
+                        ));
+                    }
                 }
             }
             Ok(format!("Moved {total} {} to Trash", item_word(total)))
@@ -215,11 +249,11 @@ pub fn execute(operation: Operation) -> Result<String, String> {
             sources,
             destination,
             name,
-        } => archive::compress(sources, &destination, &name),
+        } => archive::compress(sources, &destination, &name, journal),
         Operation::Extract {
             archive,
             destination,
-        } => archive::extract(&archive, &destination),
+        } => archive::extract(&archive, &destination, journal),
         Operation::Open { path } => {
             let path = checked_open_item(&path)?;
             platform::open(&path)?;
@@ -233,6 +267,7 @@ pub fn execute(operation: Operation) -> Result<String, String> {
                 path.display()
             ))
         }
+        Operation::Reverse(record) => history::reverse(record, bin, journal),
     }
 }
 
@@ -429,7 +464,13 @@ fn ensure_absent(path: &Path) -> Result<(), String> {
     }
 }
 
-fn transfer(sources: Vec<PathBuf>, destination: PathBuf, moving: bool) -> Result<String, String> {
+fn transfer(
+    sources: Vec<PathBuf>,
+    destination: PathBuf,
+    moving: bool,
+    bin: &dyn Bin,
+    journal: &mut Journal,
+) -> Result<String, String> {
     let destination = checked_directory(&destination)?;
     let sources = checked_selection(sources)?;
     let mut targets = HashSet::with_capacity(sources.len());
@@ -454,15 +495,23 @@ fn transfer(sources: Vec<PathBuf>, destination: PathBuf, moving: bool) -> Result
     let total = transfers.len();
     for (completed, (source, target)) in transfers.into_iter().enumerate() {
         let result = if moving {
-            move_one(&source, &target)
+            move_one(&source, &target, bin)
         } else {
-            copy_one(&source, &target)
+            copy_one(&source, &target).map_err(MoveError::from)
         };
-        if let Err(error) = result {
-            return Err(format!(
-                "{} {completed} of {total} items. {error}",
-                if moving { "Moved" } else { "Copied" }
-            ));
+        match result {
+            Ok(()) if moving => journal.moved(&source, &target),
+            Ok(()) => journal.created(&target),
+            Err(error) => {
+                if error.copied {
+                    journal.created(&target);
+                }
+                return Err(format!(
+                    "{} {completed} of {total} items. {}",
+                    if moving { "Moved" } else { "Copied" },
+                    error.message
+                ));
+            }
         }
     }
     Ok(format!(
@@ -476,9 +525,26 @@ fn item_word(count: usize) -> &'static str {
     if count == 1 { "item" } else { "items" }
 }
 
-fn move_one(source: &Path, target: &Path) -> Result<(), String> {
+/// Why an item did not move. A move between volumes may have published its
+/// complete copy already, which then stays beside the original.
+#[derive(Debug)]
+struct MoveError {
+    message: String,
+    copied: bool,
+}
+
+impl From<String> for MoveError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            copied: false,
+        }
+    }
+}
+
+fn move_one(source: &Path, target: &Path, bin: &dyn Bin) -> Result<(), MoveError> {
     move_one_with(source, target, platform::rename_noreplace, |source| {
-        trash::delete(source).map_err(|error| error.to_string())
+        bin.recycle(source).map(drop)
     })
 }
 
@@ -487,23 +553,27 @@ fn move_one_with(
     target: &Path,
     rename: impl FnOnce(&Path, &Path) -> io::Result<()>,
     recycle: impl FnOnce(&Path) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<(), MoveError> {
     let original = fs::symlink_metadata(source)
         .map_err(|error| describe("inspect move source", source, error))?;
     match rename(source, target) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
             copy_one(source, target)?;
-            let current = fs::symlink_metadata(source).map_err(|error| format!("A complete copy is available at {}, but the original could no longer be verified and was not recycled: {error}", target.display()))?;
+            let kept = |message| MoveError {
+                message,
+                copied: true,
+            };
+            let current = fs::symlink_metadata(source).map_err(|error| kept(format!("A complete copy is available at {}, but the original could no longer be verified and was not recycled: {error}", target.display())))?;
             if !unchanged_metadata(&original, &current) {
-                return Err(format!(
+                return Err(kept(format!(
                     "A complete copy is available at {}, but the original changed during the transfer and was left in place. Both items remain",
                     target.display()
-                ));
+                )));
             }
-            recycle(source).map_err(|error| format!("A complete copy is available at {}, but the original could not be moved to Trash: {error}. Both items remain; no original was permanently deleted", target.display()))
+            recycle(source).map_err(|error| kept(format!("A complete copy is available at {}, but the original could not be moved to Trash: {error}. Both items remain; no original was permanently deleted", target.display())))
         }
-        Err(error) => Err(describe("move", source, error)),
+        Err(error) => Err(describe("move", source, error).into()),
     }
 }
 
@@ -945,7 +1015,8 @@ mod tests {
             |_| Err("fixture recycle failure".into()),
         )
         .unwrap_err();
-        assert!(error.contains("Both items remain"));
+        assert!(error.message.contains("Both items remain"));
+        assert!(error.copied);
         assert_eq!(fs::read(&source).unwrap(), b"recoverable");
         assert_eq!(fs::read(&target).unwrap(), b"recoverable");
     }
@@ -995,7 +1066,8 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(error.contains("original changed"));
+        assert!(error.message.contains("original changed"));
+        assert!(error.copied);
         assert!(!called.load(Ordering::Relaxed));
         assert_eq!(fs::read(&source).unwrap(), b"changed by a writer");
         assert_eq!(fs::read(&target).unwrap(), b"changed by a writer");

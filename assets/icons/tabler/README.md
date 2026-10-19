@@ -13,7 +13,7 @@ notice is preserved in [LICENSE.txt](LICENSE.txt).
 
 ## Native rendering
 
-The application embeds outline.ttf (89 glyphs, 23,464 bytes) and filled.ttf
+The application embeds outline.ttf (91 glyphs, 23,800 bytes) and filled.ttf
 (5 glyphs, 1,460 bytes). Dedicated font families do not alter monospaced or UI text
 fallbacks. Call `icons::register_fonts` when constructing every font definition
 set, including asynchronously discovered system fonts, before `ctx.set_fonts`.
@@ -39,7 +39,7 @@ remain the caller's responsibility.
 ## Neptune ecosystem provenance
 
 Terminal's 79 native mappings and their SVGs are copied byte-for-byte from
-Neptune Terminal. Finder adds fourteen outline glyphs and one filled glyph a
+Neptune Terminal. Finder adds sixteen outline glyphs and one filled glyph a
 file explorer needs (listed last below) from the same pinned release, and
 regenerates the fonts with the shared generator; Terminal's glyph outlines are unchanged. Finder uses
 the same renderer and button interaction geometry. Terminal-specific provider artwork
@@ -142,6 +142,8 @@ is not needed by the explorer and is not bundled here.
 | `Icon::Pin` | `pin` | outline | Finder: Pinned folders. |
 | `Icon::Scissors` | `scissors` | outline | Finder: Cut. |
 | `Icon::Info` | `info-circle` | outline | Finder: About Neptune Finder. |
+| `Icon::Undo` | `arrow-back-up` | outline | Finder: Undo, the glyph Tabler tags undo. |
+| `Icon::Redo` | `arrow-forward-up` | outline | Finder: Redo, the glyph Tabler tags redo. |
 | `Icon::FolderFilled` | `folder` | filled | Finder: Folders listed among files, solid so they stand apart from outline file kinds and actions. |
 
 ## Reproducible generation

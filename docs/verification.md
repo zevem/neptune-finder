@@ -63,7 +63,7 @@ OS-input tests sequentially because focus is shared.
 | Linux X11 and Wayland | Native release build, input, clipboard, drag/drop, dialogs, default-app opening, trash, mounts and DPI |
 | macOS | Native Apple Silicon/Intel package acceptance; filesystem permissions, Trash, default-app opening, keyboard conventions, IME, accessibility and Retina |
 | Windows | Native installed package; path/drive/UNC handling, long names, symlinks, sharing violations, Recycle Bin, clipboard, dialogs and DPI |
-| File safety | Existing destinations, self-copy, recursive source/destination overlap, symlinks, readonly files, shutdown/queued cancellation, partial failures, cross-filesystem moves, hostile or oversized ZIP archives and unavailable mounts; implement/review interactive operation cancellation and progress before claiming them |
+| File safety | Existing destinations, self-copy, recursive source/destination overlap, symlinks, readonly files, shutdown/queued cancellation, partial failures, cross-filesystem moves, hostile or oversized ZIP archives, unavailable mounts and Undo/Redo of every operation, including restoring from each system's Trash; implement/review interactive operation cancellation and progress before claiming them |
 | Search and preview | Large/deep trees, Unicode and non-UTF-8 names where supported, symlink cycles, unreadable/binary/large files and rapid cancellation |
 | Responsiveness | Release startup, first result, scroll frame percentiles, idle CPU/RSS, large folders, previews and operation load with recorded host/filesystem |
 | Recovery | Atomic settings/session saves, malformed or unsupported saved state, crash during operation and clear partial-result reporting |
@@ -72,12 +72,16 @@ OS-input tests sequentially because focus is shared.
 
 Do not advertise network browsing protocols, indexed content search, OS file tags,
 archive editing, privileged operations or transactional undo unless the feature
-is implemented and verified. Copies currently do not preserve ACLs, extended attributes, resource forks, sparse
+is implemented and verified. Undo reverses item by item and may leave items it
+cannot change back; it is not a transaction. Restoring from the Windows Recycle
+Bin needs native runtime acceptance. On macOS, reversals that would take items
+back out of the Trash (Undo of Move to Trash, Redo of an undone copy or new
+item) report that Put Back must be used. Copies currently do not preserve ACLs, extended attributes, resource forks, sparse
 allocation, hard-link relationships or directory timestamps. File copy/cut/paste
 is currently application-local; cross-application file clipboard and native drag/drop
 need implementation/acceptance before a full file-manager parity claim.
 
-System trash offers recoverability through the OS;
-it does not establish an application-wide undo stack. CI configuration is not a
+System trash offers recoverability through the OS; the application's Undo
+history covers only changes made in Finder during the current session. CI configuration is not a
 completed CI run. Actual results belong in the delivery report with their build
 and host scope.

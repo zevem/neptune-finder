@@ -59,8 +59,12 @@ Never silently replace an existing destination. Recursive operations must handle
 self-copy, destinations inside a source directory, symlinks, cancellation,
 permission failures and partially completed work explicitly. Queued work is
 bounded; dropping the service cancels queued requests while an accepted operation
-finishes its transaction. There is no interactive mid-operation cancel or
-application undo in the current implementation. System trash is preferred for
+finishes its transaction. There is no interactive mid-operation cancel in the
+current implementation. `finder-operations` journals each completed change into
+a `Record` and reverses records it is given; the desktop owns the bounded,
+unsaved Undo/Redo history (`src/undo.rs`) and starts a reversal only when no
+other file work is running. A reversal never replaces an item, and removes what
+an operation made only through the Trash. System trash is preferred for
 recoverable deletion. A failed trash request must remain a failure instead of
 falling back to permanent deletion.
 

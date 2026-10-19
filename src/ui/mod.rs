@@ -10,10 +10,11 @@ use crate::{
     icons::Icon,
     model::{Pane, Workspace},
     theme::{self, Palette},
+    undo::Direction,
 };
 use eframe::egui::{self, Key, Modifiers, Rect, Stroke, StrokeKind, Vec2};
 use finder_core::{Entry, EntryKind, SortField};
-use finder_operations::Operation;
+use finder_operations::{Kind, Operation, Record};
 use std::path::{Path, PathBuf};
 
 pub enum Action {
@@ -50,6 +51,9 @@ pub enum Action {
     Zoom(ZoomStep),
     /// Extract an archive into a typed folder.
     ExtractTo(PathBuf, String),
+    /// Reverse the newest completed file operation, or redo the newest Undo.
+    Undo,
+    Redo,
 }
 pub enum Dialog {
     New {
@@ -146,6 +150,9 @@ pub struct UiState {
     pub brand_icon: Option<egui::TextureHandle>,
     pub busy: usize,
     pub can_paste: bool,
+    /// What Undo and Redo would reverse, as their commands name it.
+    pub undo: Option<String>,
+    pub redo: Option<String>,
     /// Items cut to the clipboard, shown faded until they are pasted or the
     /// clipboard holds something else.
     pub cut: std::collections::HashSet<PathBuf>,
@@ -236,6 +243,8 @@ impl UiState {
             brand_icon: None,
             busy: 0,
             can_paste: false,
+            undo: None,
+            redo: None,
             cut: Default::default(),
             pasted: false,
             focus_search: false,
@@ -712,6 +721,13 @@ fn keyboard(
     if ctx.text_edit_focused() {
         return;
     }
+    // Redo is taken first: Command+Z alone also matches its shifted chord.
+    if take(ctx, shift, Key::Z) || (!cfg!(target_os = "macos") && take(ctx, command, Key::Y)) {
+        actions.push(Action::Redo);
+    }
+    if take(ctx, command, Key::Z) {
+        actions.push(Action::Undo);
+    }
     let (copy, cut, paste) = clipboard_chords(ctx, &mut state.pasted);
     if copy || cut {
         actions.push(Action::Copy(
@@ -932,6 +948,72 @@ pub fn folder_entry(pane: &Pane) -> Entry {
         size: 0,
         modified: None,
     }
+}
+
+/// How Undo or Redo names the record it reverses: “Undo move”.
+pub fn history_label(direction: Direction, record: &Record) -> String {
+    let verb = match direction {
+        Direction::Undo => "Undo",
+        Direction::Redo => "Redo",
+    };
+    format!("{verb} {}", operation_name(record.kind()))
+}
+
+/// What an Undo or Redo changed, for the chip that confirms it: the
+/// operation, and how many items when there were several.
+pub fn history_summary(record: &Record) -> String {
+    let name = operation_name(record.kind());
+    let mut summary = name[..1].to_uppercase() + &name[1..];
+    if record.len() > 1 {
+        summary.push_str(&format!(" · {} items", record.len()));
+    }
+    summary
+}
+
+fn operation_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::NewFolder => "new folder",
+        Kind::NewFile => "new file",
+        Kind::Rename => "rename",
+        Kind::Copy => "copy",
+        Kind::Move => "move",
+        Kind::Trash => "move to Trash",
+        Kind::Compress => "compress",
+        Kind::Extract => "extract",
+    }
+}
+
+/// Undo and Redo rows for a menu, shown only when there is something to
+/// reverse. Returns whether either was shown.
+fn history_items(
+    ui: &mut egui::Ui,
+    p: Palette,
+    state: &UiState,
+    actions: &mut Vec<Action>,
+) -> bool {
+    let rows = [
+        (&state.undo, Icon::Undo, "Z", Action::Undo),
+        (&state.redo, Icon::Redo, "Shift+Z", Action::Redo),
+    ];
+    let mut shown = false;
+    for (label, icon, key, action) in rows {
+        let Some(label) = label else {
+            continue;
+        };
+        shown = true;
+        if crate::controls::menu_item(
+            ui,
+            p,
+            icon,
+            label,
+            &crate::controls::edit_shortcut(key),
+            false,
+        ) {
+            actions.push(action);
+            ui.close();
+        }
+    }
+    shown
 }
 
 /// Properties' keyboard chord as the platform writes it.

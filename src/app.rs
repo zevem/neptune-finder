@@ -6,11 +6,12 @@ use crate::{
     preview::{PreviewContent, Previews},
     thumbnails::{self, Thumbnails},
     ui::{self, Action, Dialog, UiState},
+    undo::{Asked, Direction, History},
     watch::Watches,
 };
 use eframe::egui;
 use finder_core::{Entry, Inspector, ScanOptions, Scanner};
-use finder_operations::{Operation, Operations};
+use finder_operations::{Operation, OperationResult, Operations, Record};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -46,6 +47,9 @@ pub struct FinderApp {
     busy: HashSet<u64>,
     mutations: HashSet<u64>,
     pending_cut: HashMap<u64, Vec<PathBuf>>,
+    history: History,
+    /// Undo and Redo in progress, by operation.
+    reversals: HashMap<u64, Direction>,
     search_deadline: Option<(Instant, u64)>,
     watch_deadline: Option<Instant>,
     save_deadline: Option<Instant>,
@@ -135,6 +139,8 @@ impl FinderApp {
             busy: HashSet::new(),
             mutations: HashSet::new(),
             pending_cut: HashMap::new(),
+            history: History::default(),
+            reversals: HashMap::new(),
             search_deadline: None,
             watch_deadline: None,
             save_deadline: None,
@@ -314,10 +320,11 @@ impl FinderApp {
                 }
             }
         }
-        while let Some(result) = self.operations.poll() {
-            self.busy.remove(&result.id);
-            if let Some(paths) = self.pending_cut.remove(&result.id)
-                && result.result.is_ok()
+        while let Some(completion) = self.operations.poll() {
+            let OperationResult { id, result, record } = completion;
+            self.busy.remove(&id);
+            if let Some(paths) = self.pending_cut.remove(&id)
+                && result.is_ok()
                 && self
                     .clipboard
                     .as_ref()
@@ -325,17 +332,37 @@ impl FinderApp {
             {
                 self.set_clipboard(None);
             }
-            // Finished work shows in the files themselves; only a failure
-            // needs a message.
-            if let Err(error) = result.result {
-                self.ui.notice = Some(ui::Notice::problem(format!(
-                    "Operation could not be completed: {error}"
-                )));
+            if let Some(direction) = self.reversals.remove(&id) {
+                self.reversed(direction, result, record, ctx);
+            } else {
+                match record {
+                    Some(record) => self.history.record(record),
+                    // A queued Undo must not reverse older work in place of
+                    // work that did not happen.
+                    None if result.is_err() => self.history.cancel_waiting(),
+                    None => {}
+                }
+                // Finished work shows in the files themselves; only a
+                // failure needs a message.
+                if let Err(error) = result {
+                    self.ui.notice = Some(ui::Notice::problem(format!(
+                        "Operation could not be completed: {error}"
+                    )));
+                }
             }
-            if self.mutations.remove(&result.id) {
+            if self.mutations.remove(&id) {
                 self.reload_visible(ctx);
             }
         }
+        self.run_queued();
+        self.ui.undo = self
+            .history
+            .next(Direction::Undo)
+            .map(|record| ui::history_label(Direction::Undo, record));
+        self.ui.redo = self
+            .history
+            .next(Direction::Redo)
+            .map(|record| ui::history_label(Direction::Redo, record));
         if let Some(result) = self.previews.poll()
             && result.generation == self.preview_generation
         {
@@ -439,6 +466,89 @@ impl FinderApp {
                 self.ui.notice = Some(ui::Notice::problem(error));
                 None
             }
+        }
+    }
+    /// Undo or Redo the newest record, once any file work in progress has
+    /// finished and joined the history.
+    fn step_history(&mut self, direction: Direction) {
+        let message = match (
+            self.history.ask(direction, !self.mutations.is_empty()),
+            direction,
+        ) {
+            (Asked::Nothing, Direction::Undo) => "Nothing to undo.",
+            (Asked::Nothing, Direction::Redo) => "Nothing to redo.",
+            (Asked::Waiting, Direction::Undo) => "Undo will follow the file operation in progress.",
+            (Asked::Waiting, Direction::Redo) => "Redo will follow the file operation in progress.",
+            (Asked::Ready, _) => return self.run_queued(),
+        };
+        self.ui.notice = Some(ui::Notice::info(message));
+    }
+    /// Start the next asked-for Undo or Redo when no file work is running.
+    fn run_queued(&mut self) {
+        let Some((direction, record)) = self.history.start(!self.mutations.is_empty()) else {
+            return;
+        };
+        match self.submit(Operation::Reverse(record.clone())) {
+            Some(id) => {
+                self.reversals.insert(id, direction);
+            }
+            None => {
+                self.history.put_back(direction, record);
+                self.history.cancel_waiting();
+            }
+        }
+    }
+    /// An Undo or Redo finished. Its record reverses it in turn, and the
+    /// items it brought back are selected where a pane shows their folder.
+    fn reversed(
+        &mut self,
+        direction: Direction,
+        result: Result<String, String>,
+        record: Option<Record>,
+        ctx: &egui::Context,
+    ) {
+        let verb = match direction {
+            Direction::Undo => "Undo",
+            Direction::Redo => "Redo",
+        };
+        match (&result, &record) {
+            (Ok(_), Some(record)) => {
+                self.ui.level = Some(crate::controls::Level {
+                    name: verb,
+                    value: ui::history_summary(record),
+                    shown: ctx.input(|input| input.time),
+                });
+                ctx.request_repaint();
+            }
+            (Ok(_), None) => {}
+            (Err(error), _) => {
+                self.ui.notice = Some(ui::Notice::problem(format!(
+                    "{verb} could not be completed: {error}"
+                )));
+                self.history.cancel_waiting();
+            }
+        }
+        if let Some(record) = record {
+            for pane in self
+                .workspace
+                .tabs
+                .iter_mut()
+                .flat_map(|tab| &mut tab.panes)
+            {
+                let items = record
+                    .items()
+                    .filter(|item| item.parent() == Some(pane.path.as_path()))
+                    .map(Path::to_owned)
+                    .collect::<std::collections::BTreeSet<_>>();
+                // Kept by the listing that arrives if the items are there.
+                // The keyboard no longer continues from an earlier row.
+                if !items.is_empty() {
+                    pane.selected = items;
+                    pane.anchor = None;
+                    pane.focus_index = None;
+                }
+            }
+            self.history.reversed(direction, record);
         }
     }
     fn quick_look(&mut self, path: PathBuf) {
@@ -638,6 +748,8 @@ impl FinderApp {
                 }
             }
             Action::CopyPath(path) => ctx.copy_text(path.to_string_lossy().into_owned()),
+            Action::Undo => self.step_history(Direction::Undo),
+            Action::Redo => self.step_history(Direction::Redo),
             Action::Submit(operation) => {
                 self.ui.dialog = None;
                 self.submit(operation);

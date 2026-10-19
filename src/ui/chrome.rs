@@ -1083,132 +1083,146 @@ fn more_menu(
 ) {
     egui::Popup::menu(menu).show(|ui| {
         controls::menu_layout(ui, 230.0);
-        let path = workspace.pane().path.clone();
-        if controls::menu_item(
-            ui,
-            p,
-            Icon::FolderPlus,
-            "New folder…",
-            &controls::edit_shortcut("Shift+N"),
-            false,
-        ) {
-            state.open_dialog(Dialog::New {
-                parent: path.clone(),
-                name: String::new(),
-                folder: true,
+        // A short window scrolls the menu below its button instead of
+        // raising it over the button, where a second click would choose an
+        // item rather than close the menu.
+        let frame = ui.style().spacing.menu_margin.sum().y + 2.0 * ui.visuals().window_stroke.width;
+        let room = ui.ctx().content_rect().bottom() - menu.rect.bottom() - frame - 8.0;
+        egui::ScrollArea::vertical()
+            .id_salt("more-menu")
+            .max_height(room.max(80.0))
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                if super::history_items(ui, p, state, actions) {
+                    controls::menu_separator(ui, p);
+                }
+                let path = workspace.pane().path.clone();
+                if controls::menu_item(
+                    ui,
+                    p,
+                    Icon::FolderPlus,
+                    "New folder…",
+                    &controls::edit_shortcut("Shift+N"),
+                    false,
+                ) {
+                    state.open_dialog(Dialog::New {
+                        parent: path.clone(),
+                        name: String::new(),
+                        folder: true,
+                    });
+                    ui.close();
+                }
+                if controls::menu_item(ui, p, Icon::FilePlus, "New file…", "", false) {
+                    state.open_dialog(Dialog::New {
+                        parent: path.clone(),
+                        name: String::new(),
+                        folder: false,
+                    });
+                    ui.close();
+                }
+                if controls::menu_item(
+                    ui,
+                    p,
+                    Icon::ArrowUpRight,
+                    "Go to folder…",
+                    &controls::edit_shortcut("L"),
+                    false,
+                ) {
+                    state.go_to_folder(workspace.pane());
+                    ui.close();
+                }
+                controls::menu_separator(ui, p);
+                if !roomy {
+                    if controls::menu_item(
+                        ui,
+                        p,
+                        Icon::List,
+                        "List view",
+                        &controls::edit_shortcut("2"),
+                        false,
+                    ) {
+                        actions.push(Action::View(ViewMode::List));
+                        ui.close();
+                    }
+                    if controls::menu_item(
+                        ui,
+                        p,
+                        Icon::Grid,
+                        "Icon view",
+                        &controls::edit_shortcut("1"),
+                        false,
+                    ) {
+                        actions.push(Action::View(ViewMode::Grid));
+                        ui.close();
+                    }
+                    if controls::menu_item(
+                        ui,
+                        p,
+                        Icon::SplitVertical,
+                        "Toggle split view",
+                        &controls::edit_shortcut("\\"),
+                        false,
+                    ) {
+                        actions.push(Action::ToggleSplit);
+                        ui.close();
+                    }
+                }
+                if controls::menu_item(
+                    ui,
+                    p,
+                    Icon::Eyes,
+                    if config.show_hidden {
+                        "Hide hidden files"
+                    } else {
+                        "Show hidden files"
+                    },
+                    &if cfg!(target_os = "macos") {
+                        String::from("⌘⇧.")
+                    } else {
+                        controls::edit_shortcut("H")
+                    },
+                    false,
+                ) {
+                    actions.push(Action::ToggleHidden);
+                    ui.close();
+                }
+                let pinned = config.favorites.contains(&path);
+                if controls::menu_item(
+                    ui,
+                    p,
+                    Icon::Pin,
+                    if pinned {
+                        "Unpin this folder"
+                    } else {
+                        "Pin this folder"
+                    },
+                    "",
+                    false,
+                ) {
+                    actions.push(Action::Favorite(path.clone()));
+                    ui.close();
+                }
+                if controls::menu_item(ui, p, Icon::Refresh, "Refresh", "F5", false) {
+                    actions.push(Action::Reload);
+                    ui.close();
+                }
+                controls::menu_separator(ui, p);
+                if controls::menu_item(
+                    ui,
+                    p,
+                    Icon::Settings,
+                    "Preferences…",
+                    &controls::edit_shortcut(","),
+                    false,
+                ) {
+                    state.open_dialog(Dialog::Preferences);
+                    ui.close();
+                }
+                if controls::menu_item(ui, p, Icon::Info, "About Neptune Finder", "", false) {
+                    state.open_dialog(Dialog::About);
+                    ui.close();
+                }
             });
-            ui.close();
-        }
-        if controls::menu_item(ui, p, Icon::FilePlus, "New file…", "", false) {
-            state.open_dialog(Dialog::New {
-                parent: path.clone(),
-                name: String::new(),
-                folder: false,
-            });
-            ui.close();
-        }
-        if controls::menu_item(
-            ui,
-            p,
-            Icon::ArrowUpRight,
-            "Go to folder…",
-            &controls::edit_shortcut("L"),
-            false,
-        ) {
-            state.go_to_folder(workspace.pane());
-            ui.close();
-        }
-        controls::menu_separator(ui, p);
-        if !roomy {
-            if controls::menu_item(
-                ui,
-                p,
-                Icon::List,
-                "List view",
-                &controls::edit_shortcut("2"),
-                false,
-            ) {
-                actions.push(Action::View(ViewMode::List));
-                ui.close();
-            }
-            if controls::menu_item(
-                ui,
-                p,
-                Icon::Grid,
-                "Icon view",
-                &controls::edit_shortcut("1"),
-                false,
-            ) {
-                actions.push(Action::View(ViewMode::Grid));
-                ui.close();
-            }
-            if controls::menu_item(
-                ui,
-                p,
-                Icon::SplitVertical,
-                "Toggle split view",
-                &controls::edit_shortcut("\\"),
-                false,
-            ) {
-                actions.push(Action::ToggleSplit);
-                ui.close();
-            }
-        }
-        if controls::menu_item(
-            ui,
-            p,
-            Icon::Eyes,
-            if config.show_hidden {
-                "Hide hidden files"
-            } else {
-                "Show hidden files"
-            },
-            &if cfg!(target_os = "macos") {
-                String::from("⌘⇧.")
-            } else {
-                controls::edit_shortcut("H")
-            },
-            false,
-        ) {
-            actions.push(Action::ToggleHidden);
-            ui.close();
-        }
-        let pinned = config.favorites.contains(&path);
-        if controls::menu_item(
-            ui,
-            p,
-            Icon::Pin,
-            if pinned {
-                "Unpin this folder"
-            } else {
-                "Pin this folder"
-            },
-            "",
-            false,
-        ) {
-            actions.push(Action::Favorite(path.clone()));
-            ui.close();
-        }
-        if controls::menu_item(ui, p, Icon::Refresh, "Refresh", "F5", false) {
-            actions.push(Action::Reload);
-            ui.close();
-        }
-        controls::menu_separator(ui, p);
-        if controls::menu_item(
-            ui,
-            p,
-            Icon::Settings,
-            "Preferences…",
-            &controls::edit_shortcut(","),
-            false,
-        ) {
-            state.open_dialog(Dialog::Preferences);
-            ui.close();
-        }
-        if controls::menu_item(ui, p, Icon::Info, "About Neptune Finder", "", false) {
-            state.open_dialog(Dialog::About);
-            ui.close();
-        }
     });
 }
 

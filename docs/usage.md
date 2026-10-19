@@ -86,10 +86,33 @@ the source into system trash.
 
 Move to Trash uses the operating system's recoverable trash and requires
 confirmation. A trash failure is reported and never falls back to permanent
-deletion. Finder has no application-wide undo, permanent delete, merge/overwrite
-or mid-operation cancellation yet. Restore trashed items through the operating
+deletion. Finder has no permanent delete, merge/overwrite or mid-operation
+cancellation yet. Restore trashed items with Undo or through the operating
 system. Native Reveal opens the containing folder on Linux and selects the item
 on macOS/Windows; native runtime acceptance is still required on those systems.
+
+## Undo and Redo
+
+Undo (Command+Z) reverses the newest file change made in Finder: a move, copy,
+paste, drag and drop, rename, new folder or file, Move to Trash, compression or
+extraction. Redo (Command+Shift+Z, or Ctrl+Y on Linux/Windows) makes the change
+again. The More menu and a folder's own context menu name the change each would
+reverse, and the items changed back are selected where a pane shows their folder.
+
+Undoing a move or rename puts the items back under their earlier names. Undoing
+a copy, a new item, a compressed archive or an extraction moves what it made to
+Trash; nothing is deleted permanently. Undoing Move to Trash, and redoing such
+an Undo, restores the items from the system Trash on Linux and from the Recycle
+Bin on Windows, where native runtime acceptance is still required. Finder cannot
+take items back out of the macOS Trash yet; use Put Back there instead.
+
+Undo never replaces an item. Each item is changed back on its own: one whose
+earlier name is now taken, that is no longer there or that has been replaced by
+a different kind of item is left as it is and reported, while the others are
+still changed back. Pressing Undo while file work is in progress waits for that
+work and then reverses it. The history keeps up to the newest 64 changes for the
+whole window and starts empty in each session. Editing fields keep Command+Z for
+their own text.
 
 ## Archives
 
@@ -237,6 +260,7 @@ and modal dialogs retain their own text/selection shortcuts.
 | New folder | Command+Shift+N |
 | Rename | F2 |
 | Copy / Cut / Paste | Command+C / Command+X / Command+V |
+| Undo / Redo | Command+Z / Command+Shift+Z; also Ctrl+Y on Linux/Windows |
 | Select all | Command+A |
 | Move selected items to Trash | Delete; ⌘Backspace on macOS |
 | Quick Look | Space |
@@ -248,5 +272,5 @@ and modal dialogs retain their own text/selection shortcuts.
 
 The interface implements the core workflow above. Full Ubuntu Files/macOS
 Finder parity, browsing network services or the trash, indexed content search,
-file tags, archive editing, application undo and signed installers are remaining
+file tags, archive editing and signed installers are remaining
 product/release work; see [verification](verification.md).

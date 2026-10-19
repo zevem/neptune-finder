@@ -325,6 +325,10 @@ class Review:
                 if not self.scenario("file-operations", self.file_operations):
                     self.close_sheet()
                     self.go(self.directory)
+                elif not self.scenario("undo-and-redo", self.undo_and_redo):
+                    self.close_sheet()
+                    self.call("resize", 1180, 780)
+                    self.go(self.directory)
                 if not self.scenario("archives", self.archives):
                     self.close_sheet()
                     self.go(self.directory)
@@ -481,6 +485,57 @@ class Review:
         self.click("Cancel", "button")
         self.check("trash cancellation preserves fixture", renamed.is_dir(), "Confirmation was cancelled; no item was sent to the OS Trash")
         self.go(self.directory, capture="15-location-editor")
+
+    def toggle_more_menu(self, shown):
+        self.click("More actions", "button")
+        self.wait("More menu " + ("open" if shown else "closed"), lambda: bool(self.nodes("About Neptune Finder")) == shown)
+
+    def undo_and_redo(self):
+        # The newest changes are the drag and the cut and paste. Undoing the
+        # copy before them would send its copy to the OS Trash, so this stops
+        # short of it.
+        welcome, dropped = self.directory / "Welcome.md", self.directory / "Pictures/Welcome.md"
+        notes, pasted = self.directory / "Notes.txt", self.directory / "Projects/Notes.txt"
+        self.go(self.directory)
+        self.toggle_more_menu(True)
+        self.widget("Undo move", "button")
+        self.check("More menu names the next Undo", not self.nodes("Redo move", "button"), "Only Undo is offered before anything is undone")
+        self.shot("15g-more-menu-undo")
+        self.toggle_more_menu(False)
+        self.command("z")
+        self.wait("dragged item put back", lambda: welcome.is_file() and not dropped.exists())
+        self.wait_text("Undo Move")
+        self.shot("15h-undo-chip")
+        self.check("undo returns a dragged item", welcome.is_file() and not dropped.exists(), "Command+Z moved the dropped file back to its folder")
+        self.command("z")
+        self.wait("pasted item put back", lambda: notes.is_file() and not pasted.exists())
+        self.check("undo returns a cut and pasted item", notes.is_file() and not pasted.exists(), "A second Command+Z reversed the cut and paste")
+        rows = [self.row(name)["properties"]["bounds"] for name in ("Welcome.md", "Notes.txt", "Pictures")]
+        below = max(bounds["y1"] for bounds in rows) + 80
+        left = min(bounds["x0"] for bounds in rows)
+        self.call("context", left + 260, below)
+        self.widget("Undo copy", "button")
+        self.widget("Redo move", "button")
+        self.shot("15i-folder-menu-undo-redo")
+        # A click outside closes the menu; the file list consumes Escape.
+        self.call("click", left + 40, below)
+        self.wait("folder menu closed", lambda: not self.nodes("Undo copy", "button"))
+        self.call("resize", 640, 400)
+        self.toggle_more_menu(True)
+        self.widget("Redo move", "button")
+        self.shot("15j-narrow-more-menu-undo-redo")
+        self.toggle_more_menu(False)
+        self.call("resize", 1180, 780)
+        self.command("shift+z")
+        self.wait("cut and paste redone", lambda: pasted.is_file() and not notes.exists())
+        # Linux and Windows also redo with Ctrl+Y.
+        self.command("shift+z" if sys.platform == "darwin" else "y")
+        self.wait("drag redone", lambda: dropped.is_file() and not welcome.exists())
+        self.check("redo moves both items again", pasted.is_file() and dropped.is_file(), "Redo repeated the cut and paste and the drag")
+        self.command("shift+z")
+        self.wait_text("Nothing to redo.")
+        self.shot("15k-nothing-to-redo")
+        self.dismiss_notice()
 
     def archives(self):
         self.go(self.directory)

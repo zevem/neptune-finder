@@ -433,19 +433,27 @@
       },
       {
         "path": "assets/icons/tabler/font-source.json",
-        "sha256": "16d9bb6580ed371cec338eec89891801b30ef505e95ffd8f4c59a870aa9d85ee"
+        "sha256": "593c9da4d8d4cd7299a174a45b36efb71356d91fa0ae1b5dc5be6a13d0cdd960"
       },
       {
         "path": "assets/icons/tabler/glyphs.rs",
-        "sha256": "6b87ec3b248bd045d5a0dc73182ce466fd1c205144db67d215316c77e89b0eea"
+        "sha256": "edaa158c71600a17c2c84ce42a6335c48aa77fc2499ad7e38590b2667f5bde41"
       },
       {
         "path": "assets/icons/tabler/mapping.json",
-        "sha256": "4b1585132ab23a74e2dd669bf59668ca3f7f40c4534af4a233d596c44a76d938"
+        "sha256": "f7dd249fb2962e3786bc2cd890e9caa913422d7c638025a9b7cfa03b7db4476b"
       },
       {
         "path": "assets/icons/tabler/outline.ttf",
-        "sha256": "17ff269b7ae0dbdaf7489f4b98e1861631ea1aff2d33e685455347670a07350e"
+        "sha256": "81c48da22ebb08f8e5465f521a9a60aea1b601c72b9f8e5081b75f389bf13413"
+      },
+      {
+        "path": "assets/icons/tabler/outline/arrow-back-up.svg",
+        "sha256": "42a20a833068ac155cc2e3a4176a9e80a918cc62c8bf48d3f826a2c47bde739d"
+      },
+      {
+        "path": "assets/icons/tabler/outline/arrow-forward-up.svg",
+        "sha256": "fd66d62f72c9c638108fbb97738d9ca1f969b4cf2cb54ece6f79b44d586409ad"
       },
       {
         "path": "assets/icons/tabler/outline/device-desktop.svg",

@@ -23,13 +23,14 @@ actual host; see [performance](docs/performance.md).
 - Icon-view thumbnails for images, and on freedesktop.org desktops for videos
   and documents the system has already thumbnailed.
 - Create, rename, copy, move and system trash, with existing destinations protected.
+- Undo and Redo of file changes, which never replace an existing item.
 - Default-app opening, reveal in the native file manager and Copy Path.
 - Graphite, Dusk and Light, nine accent choices, density and icon-size settings.
 - Saved preferences and session directories with isolated verification storage.
 
 File copy/cut/paste currently uses Finder's in-app clipboard. Copy Path uses the
-system text clipboard. Operations do not provide overwrite/merge, application
-undo or mid-operation cancellation. Copies do not yet preserve ACLs, extended
+system text clipboard. Operations do not provide overwrite/merge or
+mid-operation cancellation. Copies do not yet preserve ACLs, extended
 attributes or macOS resource forks. See the [operation contract](crates/finder-operations/README.md)
 and [remaining release gates](docs/verification.md).
 
