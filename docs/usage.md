@@ -53,17 +53,18 @@ except ZIP archives, which extract (see [Archives](#archives)). A middle click
 opens a file the same way without changing the selection.
 
 Drag from empty space to draw a selection rectangle: between or below icons,
-below the last row, or anywhere in a list row other than its icon and name. The
-rectangle selects what it crosses and scrolls the pane while dragged past its
-top or bottom. Hold Shift to add to the current selection, or Ctrl (Command on
-macOS) to toggle the items it crosses. Clicking empty space clears the
-selection.
+below the last row, or anywhere in an unselected list row other than its icon
+and name. The rectangle selects what it crosses and scrolls the pane while
+dragged past its top or bottom. Hold Shift to add to the current selection, or
+Ctrl (Command on macOS) to toggle the items it crosses. Clicking empty space
+clears the selection.
 
-Dragging an item by its icon or name picks up the selection; a picture of it,
-with the number of items, follows the pointer. Dropping it on a folder or on
-the other pane moves the items there. Hold Ctrl (Option on macOS) while
-dropping to copy them instead. Escape cancels the drag. Files dropped from
-other applications are copied.
+Dragging an item by its icon or name, or a selected list row from anywhere on
+its highlight, picks up the selection; a picture of it, with the number of
+items, follows the pointer. Dropping it on a folder or on the other pane moves
+the items there. Hold Ctrl (Option on macOS) while dropping to copy them
+instead. Escape cancels the drag. Files dropped from other applications are
+copied.
 
 The context menu offers actions for its target, including creation, rename,
 copy/cut, paste, trash, Quick Look, Copy Path, Properties and native reveal.

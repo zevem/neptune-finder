@@ -745,9 +745,15 @@ fn list(
                 );
                 let name = controls::galley_at(&item, pos2(rect.left() + 32.0, middle), text);
                 // The glyph and name pick the file up; the rest of the row
-                // starts a rectangle, as in Finder's list view.
+                // starts a rectangle, as in Finder's list view. A selected
+                // row is picked up anywhere on its highlight, as a selected
+                // icon is on its tile and name.
                 items.push((
-                    Rect::from_min_max(slot.min, pos2(name.right() + 6.0, slot.bottom())),
+                    if selected {
+                        slot
+                    } else {
+                        Rect::from_min_max(slot.min, pos2(name.right() + 6.0, slot.bottom()))
+                    },
                     index,
                 ));
                 let mut x = rect.left() + columns.name;
@@ -1147,9 +1153,9 @@ fn sweep(
     Some(band.translate(view.origin.to_vec2()))
 }
 
-/// A primary-button drag that starts on an item's glyph or name moves the
-/// selection; one that starts anywhere else in the files draws a selection
-/// rectangle.
+/// A primary-button drag that starts on an item's glyph or name, or anywhere
+/// on a selected list row, moves the selection; one that starts anywhere else
+/// in the files draws a selection rectangle.
 fn begin_drag(
     ui: &egui::Ui,
     pane: &mut Pane,

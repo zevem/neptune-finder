@@ -433,6 +433,53 @@ fn dragging_a_name_still_picks_up_the_files() {
 }
 
 #[test]
+fn a_selected_row_is_picked_up_anywhere_on_its_highlight() {
+    let mut harness = Harness::new(3);
+    let folder = harness.workspace.pane().path.join("Projects");
+    harness.workspace.pane_mut().entries.insert(
+        0,
+        Entry {
+            path: folder.clone(),
+            name: "Projects".into(),
+            kind: EntryKind::Directory,
+            size: 0,
+            modified: Some(SystemTime::UNIX_EPOCH),
+            hidden: false,
+        },
+    );
+    harness.workspace.pane_mut().select(1, false, false);
+    harness.workspace.pane_mut().select(2, true, false);
+    harness.warm();
+    let rows = harness.item_rects();
+    // Beside the first selected file's name, in its Kind column.
+    let from = egui::pos2(rows[1].right() - 40.0, rows[1].center().y);
+    harness.begin_drag(from);
+    assert!(!harness.workspace.pane().marquee_active());
+    assert_eq!(harness.selected_rows(), [1, 2]);
+    assert!(egui::DragAndDrop::has_any_payload(&harness.ctx));
+    let to = rows[0].center();
+    harness.frame(vec![egui::Event::PointerMoved(to)]);
+    let (actions, _) = harness.frame(vec![button(to, false)]);
+    let mut expected = vec![
+        harness.workspace.pane().entries[1].path.clone(),
+        harness.workspace.pane().entries[2].path.clone(),
+    ];
+    expected.sort();
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            Action::Submit(Operation::Move { sources, destination })
+                if destination == &folder && {
+                    let mut sources = sources.clone();
+                    sources.sort();
+                    sources == expected
+                }
+        )),
+        "the selection dropped on a folder was not moved into it"
+    );
+}
+
+#[test]
 fn a_touch_screen_leaves_drags_to_selection_and_moving_files() {
     let mut harness = Harness::new(40);
     let touch = |phase| egui::Event::Touch {
