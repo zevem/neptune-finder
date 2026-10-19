@@ -511,6 +511,79 @@ fn rename_confirmation_retains_its_original_source_after_navigation() {
     assert!(actions.iter().any(|action|matches!(action,Action::Submit(Operation::Rename {source:target,name}) if target==&source&&name=="renamed.txt")));
 }
 
+/// Presses at `from`, keeps the button down for `hold` seconds, then drags to
+/// `to` and releases there. Returns every action the gesture emitted.
+fn drag(harness: &mut Harness, from: egui::Pos2, to: egui::Pos2, hold: f64) -> Vec<Action> {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut actions = Vec::new();
+    actions.extend(
+        harness
+            .frame(vec![egui::Event::PointerMoved(from), button(from, true)])
+            .0,
+    );
+    harness.time += hold;
+    actions.extend(harness.frame(Vec::new()).0);
+    actions.extend(harness.frame(vec![egui::Event::PointerMoved(to)]).0);
+    actions.extend(harness.frame(vec![button(to, false)]).0);
+    actions.extend(harness.frame(Vec::new()).0);
+    actions
+}
+
+#[test]
+fn a_drag_released_in_its_own_folder_or_on_itself_does_nothing() {
+    let mut harness = Harness::new(3);
+    let folder = harness.workspace.pane().path.join("Projects");
+    harness.workspace.pane_mut().entries.insert(
+        0,
+        Entry {
+            path: folder.clone(),
+            name: "Projects".into(),
+            kind: EntryKind::Directory,
+            size: 0,
+            modified: Some(SystemTime::UNIX_EPOCH),
+            hidden: false,
+        },
+    );
+    harness.warm();
+    let mut rows: Vec<Rect> = harness
+        .state
+        .file_widgets
+        .iter()
+        .filter_map(|id| harness.ctx.read_response(*id))
+        .map(|response| response.rect)
+        .collect();
+    rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
+    let submitted = |actions: &[Action]| {
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::Submit(_)))
+    };
+    // A slow click turns into a drag without moving; releasing it in place
+    // used to copy the file onto itself and report a collision.
+    let file = rows[1].center();
+    assert!(!submitted(&drag(&mut harness, file, file, 1.0)));
+    assert!(!submitted(&drag(&mut harness, file, rows[2].center(), 0.0)));
+    // A folder is no target for itself.
+    let own = rows[0].center();
+    let beside = own + vec2(40.0, 0.0);
+    assert!(!submitted(&drag(&mut harness, own, beside, 0.0)));
+    let source = harness.workspace.pane().entries[1].path.clone();
+    let actions = drag(&mut harness, file, own, 0.0);
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            Action::Submit(Operation::Copy { sources, destination })
+                if sources == &[source.clone()] && destination == &folder
+        )),
+        "a file dropped on a folder was not copied into it"
+    );
+}
+
 #[test]
 fn narrow_split_views_and_scrollable_preferences_remain_bounded() {
     let mut harness = Harness::new(100);

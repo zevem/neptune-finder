@@ -70,16 +70,16 @@ pub enum Preview {
     Message(String),
 }
 
-/// What a message reports: something done, something to know, or a problem.
+/// What a message reports: something to know, or a problem. Finished work
+/// shows in the files themselves and needs no message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
-    Done,
     Info,
     Problem,
 }
 
 /// A message in the window's top trailing corner. Problems stay until they
-/// are dismissed; other messages leave by themselves after a few seconds.
+/// are dismissed; information leaves by itself after a few seconds.
 pub struct Notice {
     pub text: String,
     pub tone: Tone,
@@ -93,9 +93,6 @@ impl Notice {
             tone,
             shown: None,
         }
-    }
-    pub fn done(text: impl Into<String>) -> Self {
-        Self::new(Tone::Done, text)
     }
     pub fn info(text: impl Into<String>) -> Self {
         Self::new(Tone::Info, text)
@@ -317,7 +314,6 @@ fn show_notice(ctx: &egui::Context, p: Palette, state: &mut UiState) {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
     }
     let mark = match notice.tone {
-        Tone::Done => (Icon::CircleCheck, p.green),
         Tone::Info => (Icon::Info, p.secondary),
         Tone::Problem => (Icon::Warning, p.red),
     };
