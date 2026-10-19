@@ -10,7 +10,10 @@ Use the sidebar's familiar places or pinned folders, open a folder in the file
 view, click a folder in the path bar at the bottom of a pane, or choose Go to
 Folder (in the toolbar's More menu) to enter a location. The
 location accepts absolute paths, paths relative to the active pane, `~` and
-`~/…`. Back and Forward use that pane's own history; Up opens its parent.
+`~/…`. Back and Forward use that pane's own history; Up opens its parent. A
+mouse's side Back and Forward buttons travel the pane under the pointer, or the
+active pane elsewhere in the window. Middle-click a folder in the file view,
+sidebar or path bar to open it in a new tab.
 
 List view shows sortable file details; drag the dividers between column
 headers to resize them, or double-click one to restore the default widths.
@@ -35,7 +38,8 @@ file operations.
 Click selects an item. Ctrl-click (Command-click on macOS) toggles items;
 Shift-click selects a range. Arrow keys move selection, Shift extends it, and
 Select All selects the current result set. Open a selected folder with Enter or
-double-click; files request their operating system's default application.
+double-click; files request their operating system's default application. A
+middle click opens a file the same way without changing the selection.
 
 The context menu offers actions for its target, including creation, rename,
 copy/cut, paste, trash, Quick Look, Copy Path and native reveal. Copy and Cut

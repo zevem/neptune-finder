@@ -38,13 +38,12 @@ pub fn panes(
     let tab = &mut workspace.tabs[workspace.active];
     let count = tab.panes.len();
     let active = tab.active;
-    let gutter = metrics::GUTTER;
-    let width = (stage.width() - gutter * (count as f32 - 1.0)) / count as f32;
-    for (index, pane) in tab.panes.iter_mut().enumerate() {
-        let rect = Rect::from_min_size(
-            pos2(stage.left() + index as f32 * (width + gutter), stage.top()),
-            vec2(width, stage.height()),
-        );
+    for ((index, pane), rect) in tab
+        .panes
+        .iter_mut()
+        .enumerate()
+        .zip(pane_rects(stage, count))
+    {
         if state.dialog.is_none()
             && ui.rect_contains_pointer(rect)
             && ui.input(|i| i.pointer.any_pressed())
@@ -98,6 +97,18 @@ pub fn panes(
             actions.push(Action::Submit(operation));
         }
     }
+}
+
+/// Each pane's surface in the stage, side by side with a gutter between.
+pub fn pane_rects(stage: Rect, count: usize) -> impl Iterator<Item = Rect> {
+    let gutter = metrics::GUTTER;
+    let width = (stage.width() - gutter * (count as f32 - 1.0)) / count as f32;
+    (0..count).map(move |index| {
+        Rect::from_min_size(
+            pos2(stage.left() + index as f32 * (width + gutter), stage.top()),
+            vec2(width, stage.height()),
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -361,6 +372,8 @@ fn path_bar(
         x = crumb.right() + 2.0;
         if response.clicked() {
             actions.push(Action::Navigate(pane.id, path.clone()));
+        } else if response.middle_clicked() {
+            actions.push(Action::NewTab(path.clone()));
         }
         response
             .on_hover_cursor(CursorIcon::PointingHand)
@@ -1201,6 +1214,14 @@ fn interact(
     }
     if response.double_clicked() {
         actions.push(Action::Open(pane.id, entry.path.clone(), entry.is_dir()));
+    }
+    // A middle click opens a folder in a new tab, or a file as usual.
+    if response.middle_clicked() {
+        actions.push(if entry.is_dir() {
+            Action::NewTab(entry.path.clone())
+        } else {
+            Action::Open(pane.id, entry.path.clone(), false)
+        });
     }
     if response.drag_started() {
         if !pane.selected.contains(&entry.path) {

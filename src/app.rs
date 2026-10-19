@@ -403,18 +403,24 @@ impl FinderApp {
                     self.submit(Operation::Open { path });
                 }
             }
-            Action::Back(forward) => {
-                let pane = self.workspace.pane();
+            Action::Back(target, forward) => {
+                let Some(pane) = self.workspace.find_mut(target) else {
+                    return;
+                };
                 let possible = if forward {
                     pane.history_index + 1 < pane.history.len()
                 } else {
                     pane.history_index > 0
                 };
                 if possible {
-                    self.drain_pane(id, ctx);
+                    self.drain_pane(target, ctx);
                 }
-                if self.workspace.pane_mut().travel(forward) {
-                    self.reload(id, ctx);
+                if self
+                    .workspace
+                    .find_mut(target)
+                    .is_some_and(|pane| pane.travel(forward))
+                {
+                    self.reload(target, ctx);
                     self.watch_visible();
                     self.changed(ctx);
                 }

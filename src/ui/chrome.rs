@@ -218,6 +218,8 @@ pub fn sidebar(
                             .inner;
                         if response.clicked() {
                             actions.push(Action::Navigate(id, path.clone()));
+                        } else if response.middle_clicked() {
+                            actions.push(Action::NewTab(path.clone()));
                         }
                         response
                             .on_hover_text(path.display().to_string())
@@ -251,6 +253,8 @@ pub fn sidebar(
                             .inner;
                         if response.clicked() {
                             actions.push(Action::Navigate(id, path.clone()));
+                        } else if response.middle_clicked() {
+                            actions.push(Action::NewTab(path.clone()));
                         }
                         response
                             .on_hover_text(path.display().to_string())
@@ -288,6 +292,8 @@ pub fn sidebar(
                         .inner;
                     if response.clicked() {
                         actions.push(Action::Navigate(id, root));
+                    } else if response.middle_clicked() {
+                        actions.push(Action::NewTab(root));
                     }
                     ui.add_space(8.0);
                 });
@@ -508,7 +514,7 @@ pub fn toolbar(
     )
     .clicked()
     {
-        actions.push(Action::Back(false));
+        actions.push(Action::Back(pane.id, false));
     }
     if icon_at(
         ui,
@@ -520,7 +526,7 @@ pub fn toolbar(
     )
     .clicked()
     {
-        actions.push(Action::Back(true));
+        actions.push(Action::Back(pane.id, true));
     }
     let title_left = left + 68.0;
     let split = workspace.tabs[workspace.active].panes.len() > 1;
