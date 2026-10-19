@@ -50,6 +50,7 @@ OS-input tests sequentially because focus is shared.
 | Split view and tabs | Independent navigation/selection, clear focus, narrow layout |
 | Search | Loading, empty/error results, cancellation and navigation away |
 | Quick Look | Bounded text/image previews, unsupported/binary files, error and dismissal |
+| Properties | File, folder and link details; running, finished, partial and limited counts; closing while counting |
 | File operation dialogs | Stable targets, collision/error feedback, progress, cancellation |
 | Preferences and location | Theme changes, settings persistence, editable path focus, clipping |
 | Restored session | Tabs/directories, invalid or unavailable paths, damaged/unsupported state |

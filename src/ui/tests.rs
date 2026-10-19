@@ -1100,3 +1100,100 @@ fn middle_click_opens_a_folder_in_a_new_tab_and_a_file_directly() {
         }
     }
 }
+
+#[test]
+fn alt_enter_and_command_i_show_properties_of_one_item_or_the_folder() {
+    let mut harness = Harness::new(5);
+    harness.workspace.pane_mut().select(0, false, false);
+    harness.warm();
+    let pane = harness.workspace.pane().id;
+    let selected = harness.workspace.pane().entries[0].path.clone();
+    let row = harness.focused_file();
+    let alt_enter = |pressed| key(Key::Enter, pressed, false, Modifiers::ALT);
+    let (actions, _) = harness.frame_at(vec![alt_enter(true)], vec2(1_024.0, 720.0), Some(row));
+    assert!(actions.iter().any(
+        |action| matches!(action, Action::Properties(id, entry) if *id == pane && entry.path == selected)
+    ));
+    assert!(
+        !actions.iter().any(file_action),
+        "Alt+Enter also opened the item"
+    );
+    harness.frame(vec![alt_enter(false)]);
+
+    // With nothing selected, the chord describes the folder in view.
+    harness.workspace.pane_mut().selected.clear();
+    let folder = harness.workspace.pane().path.clone();
+    let get_info = |pressed| key(Key::I, pressed, false, Modifiers::COMMAND);
+    let (actions, _) = harness.frame(vec![get_info(true)]);
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::Properties(id, entry) if *id == pane && entry.path == folder && entry.is_dir()
+    )));
+    harness.frame(vec![get_info(false)]);
+
+    harness.workspace.pane_mut().select(0, false, false);
+    harness.workspace.pane_mut().select(1, true, false);
+    let (actions, _) = harness.frame(vec![get_info(true)]);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Properties(..))),
+        "a multiple selection chose one item's properties"
+    );
+    assert!(harness.state.notice.is_some());
+}
+
+#[test]
+fn properties_stay_open_through_the_opening_chord_and_fit_a_narrow_window() {
+    let mut harness = Harness::new(3);
+    let entry = harness.workspace.pane().entries[0].clone();
+    let pane = harness.workspace.pane().id;
+    harness.state.open_dialog(Dialog::Properties {
+        pane,
+        entry: entry.clone(),
+    });
+    let (_, _) = harness.frame(vec![key(Key::Enter, true, false, Modifiers::ALT)]);
+    assert!(
+        harness.state.dialog.is_some(),
+        "the opening chord closed Properties"
+    );
+    harness.frame(vec![key(Key::Enter, false, false, Modifiers::ALT)]);
+    harness.state.properties = Some(Ok(finder_core::Properties {
+        entry,
+        created: Some(SystemTime::UNIX_EPOCH),
+        link_target: None,
+        permissions: Some(finder_core::Permissions::Unix {
+            mode: 0o644,
+            owner: "neptune".into(),
+            group: "neptune".into(),
+            access: finder_core::Access {
+                read: true,
+                write: true,
+                execute: false,
+            },
+        }),
+        available_space: Some(227_000_000_000),
+        contents: None,
+    }));
+    for size in [vec2(1_024.0, 720.0), vec2(360.0, 420.0)] {
+        harness.frame_at(Vec::new(), size, None);
+        let (_, output) = harness.frame_at(Vec::new(), size, None);
+        assert!(harness.state.dialog.is_some());
+        assert!(output.shapes.len() < 2_000);
+        assert!(
+            output
+                .shapes
+                .iter()
+                .all(|shape| shape.clip_rect.is_finite())
+        );
+    }
+    harness.frame(vec![press(Key::Enter)]);
+    assert!(
+        harness.state.dialog.is_none(),
+        "a fresh Enter left Properties open"
+    );
+    assert!(
+        harness.state.properties.is_none(),
+        "closing kept the item's properties"
+    );
+}

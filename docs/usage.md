@@ -46,11 +46,11 @@ double-click; files request their operating system's default application. A
 middle click opens a file the same way without changing the selection.
 
 The context menu offers actions for its target, including creation, rename,
-copy/cut, paste, trash, Quick Look, Copy Path and native reveal. Copy and Cut
-capture the selected paths. Navigate to the destination pane/folder and Paste.
-The current file clipboard is local to Neptune Finder; Copy Path writes text to
-the system clipboard. Cross-application native file clipboard integration is a
-remaining release requirement.
+copy/cut, paste, trash, Quick Look, Copy Path, Properties and native reveal.
+Copy and Cut capture the selected paths. Navigate to the destination
+pane/folder and Paste. The current file clipboard is local to Neptune Finder;
+Copy Path writes text to the system clipboard. Cross-application native file
+clipboard integration is a remaining release requirement.
 
 Creating, copying, moving and renaming protect existing destinations. A collision
 is reported; automatic overwrite and directory merging are not offered. Copies
@@ -86,6 +86,25 @@ Select one item and press Space for Quick Look. Text previews read at most
 resized to a bounded preview. Unsupported, binary or oversized files show an
 explanation. Quick Look does not execute files. Close the preview to return to
 the file view.
+
+## Properties
+
+Choose Properties from an item's context menu, or select one item and press
+Alt+Enter or Command+I, to see its kind, parent folder, dates, permissions and
+the free space on its volume. With nothing selected, the shortcut (or
+Properties in the context menu of the folder's empty area) describes the folder
+in view. Permissions say what you, the owner, the group and everyone else may
+do, and give the mode as `ls` writes it; on Windows they show the read-only
+attribute.
+
+A folder's item count and total size update while a worker counts everything
+beneath it, and closing the sheet stops the count. Counting never follows
+links or enters other volumes mounted inside the folder, and stops after
+1,000,000 items or 64 folder levels; the sheet says when unreadable items or
+these limits leave the total incomplete. The size is the length of the
+regular files counted, so a hard-linked file counts each time it appears.
+For an item outside the pane's folder, such as a recursive search result,
+Open Parent Folder shows that folder with the item selected.
 
 ## Preferences and saved state
 
@@ -145,6 +164,7 @@ and modal dialogs retain their own text/selection shortcuts.
 | Select all | Command+A |
 | Move selected items to Trash | Delete; ⌘Backspace on macOS |
 | Quick Look | Space |
+| Properties | Alt+Enter or Command+I |
 | Open selected item | Enter |
 | Preferences | Command+, |
 | Zoom in / out / actual size | Command+= or Command++ / Command+- / Command+0 |

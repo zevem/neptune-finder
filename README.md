@@ -19,6 +19,7 @@ actual host; see [performance](docs/performance.md).
 - Sidebar places and pinned folders, a path bar per pane and an editable location.
 - Folder filtering and cancellable recursive filename search.
 - Bounded text and image Quick Look previews.
+- Properties: kind, dates, permissions, free space and a folder's item count and size.
 - Create, rename, copy, move and system trash, with existing destinations protected.
 - Default-app opening, reveal in the native file manager and Copy Path.
 - Graphite, Dusk and Light, nine accent choices, density and icon-size settings.

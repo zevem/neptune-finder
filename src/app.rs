@@ -8,7 +8,7 @@ use crate::{
     watch::Watches,
 };
 use eframe::egui;
-use finder_core::{Entry, ScanOptions, Scanner};
+use finder_core::{Entry, Inspector, ScanOptions, Scanner};
 use finder_operations::{Operation, Operations};
 use std::{
     collections::{HashMap, HashSet},
@@ -24,6 +24,7 @@ pub struct FinderApp {
     disposals: HashMap<u64, Vec<Entry>>,
     operations: Operations,
     previews: Previews,
+    inspector: Inspector,
     watches: Watches,
     storage: Storage,
     launch: Launch,
@@ -39,6 +40,8 @@ pub struct FinderApp {
     watch_deadline: Option<Instant>,
     save_deadline: Option<Instant>,
     preview_generation: u64,
+    /// The Properties sheet's request; zero while no sheet is open.
+    properties_generation: u64,
     started: Instant,
     capture_sent: bool,
     ephemeral: bool,
@@ -73,6 +76,8 @@ impl FinderApp {
         let wake = cc.egui_ctx.clone();
         let previews = Previews::new(move || wake.request_repaint());
         let wake = cc.egui_ctx.clone();
+        let inspector = Inspector::new(move || wake.request_repaint());
+        let wake = cc.egui_ctx.clone();
         let watches = Watches::new(move || wake.request_repaint());
         let config = Config::default();
         crate::theme::apply(&cc.egui_ctx, &config);
@@ -99,6 +104,7 @@ impl FinderApp {
             disposals: HashMap::new(),
             operations,
             previews,
+            inspector,
             watches,
             storage,
             launch,
@@ -114,6 +120,7 @@ impl FinderApp {
             watch_deadline: None,
             save_deadline: None,
             preview_generation: 0,
+            properties_generation: 0,
             started: Instant::now(),
             capture_sent: false,
             ephemeral,
@@ -321,6 +328,11 @@ impl FinderApp {
                 Ok(PreviewContent::Unsupported(message)) => ui::Preview::Message(message),
                 Err(error) => ui::Preview::Message(error),
             });
+        }
+        if let Some(result) = self.inspector.poll()
+            && result.generation == self.properties_generation
+        {
+            self.ui.properties = Some(result.result);
         }
         if let Some(error) = self.storage.poll_error() {
             self.ui.notice = Some(ui::Notice::problem(error));
@@ -589,6 +601,23 @@ impl FinderApp {
                 self.submit(operation);
             }
             Action::QuickLook(path) => self.quick_look(path),
+            Action::Properties(target, entry) => {
+                self.properties_generation = self.inspector.request(entry.path.clone());
+                self.ui.properties = None;
+                self.ui.open_dialog(Dialog::Properties {
+                    pane: target,
+                    entry,
+                });
+            }
+            Action::ShowInFolder(target, path) => {
+                if let Some(parent) = path.parent() {
+                    self.navigate(target, parent.to_owned(), ctx);
+                    // Kept by the listing that arrives if the item is still there.
+                    if let Some(pane) = self.workspace.find_mut(target) {
+                        pane.selected.insert(path);
+                    }
+                }
+            }
             Action::Favorite(path) => {
                 if let Some(index) = self.config.favorites.iter().position(|p| p == &path) {
                     self.config.favorites.remove(index);
@@ -719,6 +748,14 @@ impl eframe::App for FinderApp {
             for action in actions {
                 self.dispatch(action, &ctx);
             }
+        }
+        // Closing Properties stops a count that may still be walking a large
+        // folder.
+        if self.properties_generation != 0
+            && !matches!(self.ui.dialog, Some(Dialog::Properties { .. }))
+        {
+            self.inspector.cancel();
+            self.properties_generation = 0;
         }
         self.capture(&ctx);
     }

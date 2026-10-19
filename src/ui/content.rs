@@ -1,7 +1,7 @@
 //! Folder content: each pane is a rounded surface in the window material with
 //! its files, a search scope while searching, and a path bar that says where
 //! it is and what it holds.
-use super::{Action, Dialog, UiState, breadcrumbs, bytes};
+use super::{Action, Dialog, UiState, breadcrumbs, bytes, folder_entry, properties_shortcut};
 use crate::{
     config::{Accent, ColumnWidths, Config, ViewMode},
     controls::{self, ButtonKind},
@@ -999,7 +999,7 @@ fn row_surface(
 
 /// The icon and ink for an entry. Colour is decoration only; the kind is
 /// always also said in words.
-fn file_icon(entry: &Entry, p: Palette) -> (Icon, Color32) {
+pub(super) fn file_icon(entry: &Entry, p: Palette) -> (Icon, Color32) {
     if entry.is_dir() {
         return (Icon::FolderFilled, p.accent);
     }
@@ -1025,7 +1025,14 @@ fn file_icon(entry: &Entry, p: Palette) -> (Icon, Color32) {
     }
 }
 
-fn paint_icon(ui: &egui::Ui, entry: &Entry, icon: Icon, ink: Color32, rect: Rect, p: Palette) {
+pub(super) fn paint_icon(
+    ui: &egui::Ui,
+    entry: &Entry,
+    icon: Icon,
+    ink: Color32,
+    rect: Rect,
+    p: Palette,
+) {
     icons::paint(
         ui.painter(),
         rect,
@@ -1060,7 +1067,7 @@ fn extension(path: &Path) -> String {
 }
 
 /// What an entry is, in words a person uses.
-fn kind(entry: &Entry) -> String {
+pub(super) fn kind(entry: &Entry) -> String {
     match entry.kind {
         EntryKind::Directory => return "Folder".into(),
         EntryKind::DirectoryLink => return "Folder alias".into(),
@@ -1344,6 +1351,18 @@ fn interact(
             });
             ui.close();
         }
+        controls::menu_separator(ui, p);
+        if controls::menu_item(
+            ui,
+            p,
+            Icon::Info,
+            "Properties",
+            properties_shortcut(),
+            false,
+        ) {
+            actions.push(Action::Properties(pane.id, entry.clone()));
+            ui.close();
+        }
     });
 }
 
@@ -1451,6 +1470,11 @@ fn folder_menu(
     }
     if controls::menu_item(ui, p, Icon::Refresh, "Refresh", "F5", false) {
         actions.push(Action::ReloadPane(pane.id));
+        ui.close();
+    }
+    controls::menu_separator(ui, p);
+    if controls::menu_item(ui, p, Icon::Info, "Properties", "", false) {
+        actions.push(Action::Properties(pane.id, folder_entry(pane)));
         ui.close();
     }
 }
