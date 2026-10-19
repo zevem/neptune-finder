@@ -1,7 +1,7 @@
 //! Folder content: each pane is a rounded surface in the window material with
 //! its files, a search scope while searching, and a path bar that says where
 //! it is and what it holds.
-use super::{Action, Dialog, UiState, breadcrumbs, bytes, folder_entry, properties_shortcut};
+use super::{Action, Dialog, UiState, breadcrumbs, bytes, folder_entry, name, properties_shortcut};
 use crate::{
     config::{Accent, ColumnWidths, Config, ViewMode},
     controls::{self, ButtonKind},
@@ -1496,20 +1496,38 @@ fn interact(
     });
     response.context_menu(|ui| {
         controls::menu_layout(ui, 236.0);
-        if controls::menu_item(
-            ui,
-            p,
-            if entry.is_dir() {
-                Icon::FolderOpen
-            } else {
-                Icon::ExternalLink
-            },
-            "Open",
-            "Enter",
-            false,
-        ) {
+        // Opening an archive extracts it, as Enter and double-click do; its
+        // default application stays one choice away.
+        let archive = !entry.is_dir() && finder_operations::is_extractable(&entry.path);
+        let (icon, label) = if entry.is_dir() {
+            (Icon::FolderOpen, "Open")
+        } else if archive {
+            (Icon::FolderOpen, "Extract")
+        } else {
+            (Icon::ExternalLink, "Open")
+        };
+        if controls::menu_item(ui, p, icon, label, "Enter", false) {
             actions.push(Action::Open(pane.id, entry.path.clone(), entry.is_dir()));
             ui.close();
+        }
+        if archive {
+            if controls::menu_item(ui, p, Icon::Download, "Extract to…", "", false) {
+                state.open_dialog(Dialog::Extract {
+                    archive: entry.path.clone(),
+                    destination: entry
+                        .path
+                        .parent()
+                        .map(|parent| parent.display().to_string())
+                        .unwrap_or_default(),
+                });
+                ui.close();
+            }
+            if controls::menu_item(ui, p, Icon::ExternalLink, "Open in default app", "", false) {
+                actions.push(Action::Submit(Operation::Open {
+                    path: entry.path.clone(),
+                }));
+                ui.close();
+            }
         }
         if entry.is_dir() && controls::menu_item(ui, p, Icon::Plus, "Open in new tab", "", false) {
             actions.push(Action::NewTab(entry.path.clone()));
@@ -1582,6 +1600,15 @@ fn interact(
             });
             ui.close();
         }
+        if controls::menu_item(ui, p, Icon::FileZip, "Compress…", "", false) {
+            let sources = pane.selected.iter().cloned().collect::<Vec<_>>();
+            state.open_dialog(Dialog::Compress {
+                name: archive_name(&sources),
+                sources,
+                destination: pane.path.clone(),
+            });
+            ui.close();
+        }
         if entry.is_dir() && controls::menu_item(ui, p, Icon::Pin, "Pin to sidebar", "", false) {
             actions.push(Action::Favorite(entry.path.clone()));
             ui.close();
@@ -1605,6 +1632,14 @@ fn interact(
             ui.close();
         }
     });
+}
+
+/// The suggested archive name: the item's own name, or “Archive” for several.
+fn archive_name(sources: &[PathBuf]) -> String {
+    match sources {
+        [source] => format!("{}.zip", name(source)),
+        _ => "Archive.zip".into(),
+    }
 }
 
 /// Whether dropping these items on `destination` would do anything. A folder

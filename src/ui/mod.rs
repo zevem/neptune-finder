@@ -47,6 +47,8 @@ pub enum Action {
     View(ViewMode),
     Location(String),
     Zoom(ZoomStep),
+    /// Extract an archive into a typed folder.
+    ExtractTo(PathBuf, String),
 }
 pub enum Dialog {
     New {
@@ -60,6 +62,15 @@ pub enum Dialog {
     },
     Trash {
         paths: Vec<PathBuf>,
+    },
+    Compress {
+        sources: Vec<PathBuf>,
+        destination: PathBuf,
+        name: String,
+    },
+    Extract {
+        archive: PathBuf,
+        destination: String,
     },
     Location {
         value: String,
@@ -608,7 +619,23 @@ fn keyboard(
     {
         actions.push(Action::QuickLook(entry.path.clone()));
     }
+    // A held Enter opens once: repeating it would queue duplicate extractions
+    // or launch an application again and again.
+    let repeated = ctx.input(|i| {
+        i.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: Key::Enter,
+                    pressed: true,
+                    repeat: true,
+                    ..
+                }
+            )
+        })
+    });
     if take(ctx, Modifiers::NONE, Key::Enter)
+        && !repeated
         && let Some(entry) = workspace.pane().selected_entry()
     {
         actions.push(Action::Open(

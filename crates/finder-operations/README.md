@@ -36,7 +36,28 @@ ancestry validation and OS Trash handoffs remain path based and are not a
 security boundary against a malicious process concurrently replacing ancestor
 directories. Open writers are not locked; cross-filesystem originals remain
 recoverable in Trash. The service does not provide undo, permanent deletion,
-automatic overwrite, or directory merging.
+automatic overwrite, directory merging, archive formats other than ZIP, or
+editing an existing archive.
+
+Compress writes a DEFLATE ZIP archive into private staging beside its
+destination and publishes it with the same exclusive rename; an existing name
+is refused. Entries keep regular file contents, symbolic links, Unix
+permissions and local modification times. ZIP stores Unicode names, so other
+names and link targets are refused, as are special files.
+
+Extract reads `.zip` archives only. Before writing, it refuses archives with
+more than 250,000 entries, entries that share compressed data, or a declared
+size over 1,100 times the archive's own; DEFLATE cannot legitimately expand
+further. It also refuses password protection, names that leave the extraction
+folder or that the platform cannot store, items placed inside an extracted link
+or file, and duplicate items. Every item is staged privately and the result is
+published under the first free name (“Name”, “Name 2”, …): one top-level item as
+itself, several inside a folder named after the archive. macOS `__MACOSX`
+resource forks are skipped. Extracted items follow the process umask, set-id
+bits are not restored and folders stay writable by their owner. Symbolic links
+are recreated but never followed during extraction. A failure leaves no partial
+result. Extracted files are not flushed individually: the archive remains the
+recoverable original.
 
 Native Open and Reveal pass exact native paths as process arguments, without a
 shell. One shared sleeping reaper bounds live launcher processes and prevents

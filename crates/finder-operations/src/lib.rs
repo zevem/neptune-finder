@@ -3,8 +3,12 @@
 //! Copies are staged privately beside their destination and published with a
 //! native no-replace rename. Existing items are never merged or overwritten.
 //! Moves across filesystems recycle their original only after publication.
+//! ZIP archives are built and extracted the same way, in private staging.
 
+mod archive;
 mod platform;
+
+pub use archive::is_extractable;
 
 use std::collections::HashSet;
 use std::fs::{self, File, FileTimes, Metadata, OpenOptions};
@@ -42,6 +46,17 @@ pub enum Operation {
     },
     Trash {
         paths: Vec<PathBuf>,
+    },
+    /// Compress items into a new ZIP archive named `name` in `destination`.
+    Compress {
+        sources: Vec<PathBuf>,
+        destination: PathBuf,
+        name: String,
+    },
+    /// Extract a ZIP archive into `destination` as one new item.
+    Extract {
+        archive: PathBuf,
+        destination: PathBuf,
     },
     Open {
         path: PathBuf,
@@ -196,6 +211,15 @@ pub fn execute(operation: Operation) -> Result<String, String> {
             }
             Ok(format!("Moved {total} {} to Trash", item_word(total)))
         }
+        Operation::Compress {
+            sources,
+            destination,
+            name,
+        } => archive::compress(sources, &destination, &name),
+        Operation::Extract {
+            archive,
+            destination,
+        } => archive::extract(&archive, &destination),
         Operation::Open { path } => {
             let path = checked_open_item(&path)?;
             platform::open(&path)?;
@@ -214,7 +238,9 @@ pub fn execute(operation: Operation) -> Result<String, String> {
 
 fn validate_selection_size(operation: &Operation) -> Result<(), String> {
     let count = match operation {
-        Operation::Copy { sources, .. } | Operation::Move { sources, .. } => sources.len(),
+        Operation::Copy { sources, .. }
+        | Operation::Move { sources, .. }
+        | Operation::Compress { sources, .. } => sources.len(),
         Operation::Trash { paths } => paths.len(),
         _ => return Ok(()),
     };

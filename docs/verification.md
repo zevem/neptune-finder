@@ -62,7 +62,7 @@ OS-input tests sequentially because focus is shared.
 | Linux X11 and Wayland | Native release build, input, clipboard, drag/drop, dialogs, default-app opening, trash, mounts and DPI |
 | macOS | Native Apple Silicon/Intel package acceptance; filesystem permissions, Trash, default-app opening, keyboard conventions, IME, accessibility and Retina |
 | Windows | Native installed package; path/drive/UNC handling, long names, symlinks, sharing violations, Recycle Bin, clipboard, dialogs and DPI |
-| File safety | Existing destinations, self-copy, recursive source/destination overlap, symlinks, readonly files, shutdown/queued cancellation, partial failures, cross-filesystem moves and unavailable mounts; implement/review interactive operation cancellation and progress before claiming them |
+| File safety | Existing destinations, self-copy, recursive source/destination overlap, symlinks, readonly files, shutdown/queued cancellation, partial failures, cross-filesystem moves, hostile or oversized ZIP archives and unavailable mounts; implement/review interactive operation cancellation and progress before claiming them |
 | Search and preview | Large/deep trees, Unicode and non-UTF-8 names where supported, symlink cycles, unreadable/binary/large files and rapid cancellation |
 | Responsiveness | Release startup, first result, scroll frame percentiles, idle CPU/RSS, large folders, previews and operation load with recorded host/filesystem |
 | Recovery | Atomic settings/session saves, malformed or unsupported saved state, crash during operation and clear partial-result reporting |
