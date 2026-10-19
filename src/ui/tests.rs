@@ -669,3 +669,138 @@ fn a_zoom_chip_shows_its_value_then_leaves() {
     harness.frame(Vec::new());
     assert!(harness.state.level.is_none());
 }
+
+fn pointer_button(pos: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+fn travels(actions: &[Action]) -> Vec<(u64, bool)> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Back(pane, forward) => Some((*pane, *forward)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn mouse_back_and_forward_travel_the_pane_under_the_pointer() {
+    let mut harness = Harness::new(5);
+    let other = Pane::new(9, harness.workspace.pane().path.join("Other"));
+    harness.workspace.tabs[0].panes.push(other);
+    harness.warm();
+    let active = harness.workspace.pane().id;
+    assert_ne!(active, 9);
+    for (point, target) in [
+        (egui::pos2(768.0, 360.0), 9),
+        (egui::pos2(256.0, 360.0), active),
+        // The toolbar belongs to no pane, so the active pane travels.
+        (egui::pos2(300.0, 22.0), active),
+    ] {
+        for (button, forward) in [
+            (egui::PointerButton::Extra1, false),
+            (egui::PointerButton::Extra2, true),
+        ] {
+            let (actions, _) = harness.frame(vec![
+                egui::Event::PointerMoved(point),
+                pointer_button(point, button, true),
+            ]);
+            assert_eq!(
+                travels(&actions),
+                vec![(target, forward)],
+                "{button:?} at {point:?}"
+            );
+            let (actions, _) = harness.frame(vec![pointer_button(point, button, false)]);
+            assert!(travels(&actions).is_empty(), "release travelled again");
+        }
+    }
+}
+
+#[test]
+fn mouse_history_buttons_leave_an_open_dialog_alone() {
+    let mut harness = Harness::new(5);
+    harness.state.open_dialog(Dialog::Preferences);
+    harness.warm();
+    let point = egui::pos2(512.0, 360.0);
+    for button in [egui::PointerButton::Extra1, egui::PointerButton::Extra2] {
+        let (actions, _) = harness.frame(vec![
+            egui::Event::PointerMoved(point),
+            pointer_button(point, button, true),
+        ]);
+        assert!(travels(&actions).is_empty());
+        harness.frame(vec![pointer_button(point, button, false)]);
+    }
+}
+
+#[test]
+fn middle_click_opens_a_folder_in_a_new_tab_and_a_file_directly() {
+    for view in [ViewMode::List, ViewMode::Grid] {
+        let mut harness = Harness::new(3);
+        harness.config.view = view;
+        let folder = harness.workspace.pane().path.join("Projects");
+        harness.workspace.pane_mut().entries[0] = Entry {
+            path: folder,
+            name: "Projects".into(),
+            kind: EntryKind::Directory,
+            size: 0,
+            modified: None,
+            hidden: false,
+        };
+        harness.warm();
+        let pane = harness.workspace.pane().id;
+        // Visible rows and tiles in entry order: top to bottom, then across.
+        let mut cells = harness
+            .state
+            .file_widgets
+            .iter()
+            .filter_map(|id| harness.ctx.read_response(*id))
+            .map(|response| response.rect)
+            .collect::<Vec<_>>();
+        cells.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .unwrap()
+        });
+        let entries = harness.workspace.pane().entries.clone();
+        assert_eq!(cells.len(), entries.len());
+        for (cell, entry) in cells.iter().zip(&entries).take(2) {
+            let point = cell.center();
+            harness.frame(vec![
+                egui::Event::PointerMoved(point),
+                pointer_button(point, egui::PointerButton::Middle, true),
+            ]);
+            let (actions, _) = harness.frame(vec![pointer_button(
+                point,
+                egui::PointerButton::Middle,
+                false,
+            )]);
+            assert!(
+                actions.iter().any(|action| match action {
+                    Action::NewTab(path) => entry.is_dir() && path == &entry.path,
+                    Action::Open(target, path, false) =>
+                        !entry.is_dir() && *target == pane && path == &entry.path,
+                    _ => false,
+                }),
+                "{view:?}: middle click on {} did not open it",
+                entry.name
+            );
+            assert!(
+                !actions.iter().any(|action| matches!(
+                    action,
+                    Action::Navigate(..) | Action::Open(_, _, true)
+                )),
+                "{view:?}: a middle click navigated the pane"
+            );
+            assert!(
+                harness.workspace.pane().selected.is_empty(),
+                "{view:?}: a middle click changed the selection"
+            );
+        }
+    }
+}

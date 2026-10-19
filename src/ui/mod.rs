@@ -18,7 +18,8 @@ use std::path::PathBuf;
 pub enum Action {
     Navigate(u64, PathBuf),
     Open(u64, PathBuf, bool),
-    Back(bool),
+    /// Travel a pane's history: backward, or forward when `true`.
+    Back(u64, bool),
     Parent,
     Reload,
     ReloadPane(u64),
@@ -284,6 +285,7 @@ pub fn show(
         egui::pos2(left, top),
         egui::pos2(bounds.right() - gutter, bounds.bottom() - gutter),
     );
+    history_buttons(&ctx, workspace, state, stage, actions);
     if stage.is_positive() {
         content::panes(ui, stage, workspace, config, state, p, actions);
     }
@@ -343,6 +345,45 @@ fn window_radius(ctx: &egui::Context) -> u8 {
         theme::metrics::WINDOW_RADIUS
     } else {
         0
+    }
+}
+
+/// The mouse's back and forward buttons travel the history of the pane under
+/// the pointer, or of the active pane anywhere else in the window.
+fn history_buttons(
+    ctx: &egui::Context,
+    workspace: &Workspace,
+    state: &UiState,
+    stage: Rect,
+    actions: &mut Vec<Action>,
+) {
+    if state.dialog.is_some() {
+        return;
+    }
+    let presses = ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: true,
+                    ..
+                } => match button {
+                    egui::PointerButton::Extra1 => Some((*pos, false)),
+                    egui::PointerButton::Extra2 => Some((*pos, true)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    let tab = &workspace.tabs[workspace.active];
+    for (pos, forward) in presses {
+        let target = content::pane_rects(stage, tab.panes.len())
+            .position(|rect| rect.contains(pos))
+            .map_or(workspace.pane().id, |index| tab.panes[index].id);
+        actions.push(Action::Back(target, forward));
     }
 }
 
@@ -421,10 +462,10 @@ fn keyboard(
         actions.push(Action::View(ViewMode::List));
     }
     if take(ctx, Modifiers::ALT, Key::ArrowLeft) {
-        actions.push(Action::Back(false));
+        actions.push(Action::Back(workspace.pane().id, false));
     }
     if take(ctx, Modifiers::ALT, Key::ArrowRight) {
-        actions.push(Action::Back(true));
+        actions.push(Action::Back(workspace.pane().id, true));
     }
     if take(ctx, Modifiers::ALT, Key::ArrowUp) {
         actions.push(Action::Parent);
