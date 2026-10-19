@@ -562,6 +562,155 @@ fn search_editing_keeps_select_all_copy_and_cut_out_of_file_actions() {
     );
 }
 
+/// The centre of the widget AccessKit names `label` in the frame's output.
+fn widget_center(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+    let update = output.platform_output.accesskit_update.as_ref()?;
+    update.nodes.iter().find_map(|(_, node)| {
+        let bounds = node.bounds().filter(|_| node.label() == Some(label))?;
+        Some(egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        ))
+    })
+}
+
+fn click_events(at: egui::Pos2) -> [Vec<egui::Event>; 2] {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    [
+        vec![egui::Event::PointerMoved(at), button(true)],
+        vec![button(false)],
+    ]
+}
+
+fn location_actions(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Location(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn path_bar_crumbs_open_enclosing_folders_of_the_active_pane() {
+    let mut harness = Harness::new(3);
+    let documents = harness.workspace.pane().path.clone();
+    let home = documents.parent().unwrap().to_owned();
+    harness.state.home = home.clone();
+    harness.ctx.enable_accesskit();
+    harness.warm();
+    let (_, output) = harness.frame(Vec::new());
+    assert!(
+        harness.state.path_bar,
+        "toolbar left no room for its path bar"
+    );
+    assert!(
+        widget_center(&output, "Go to Documents").is_none(),
+        "the folder in view is not a navigation target"
+    );
+    let home_crumb = widget_center(&output, "Go to Home").expect("Home crumb");
+    let mut navigated = Vec::new();
+    for events in click_events(home_crumb) {
+        navigated.extend(harness.frame(events).0);
+    }
+    let id = harness.workspace.pane().id;
+    assert!(
+        navigated
+            .iter()
+            .any(|action| matches!(action, Action::Navigate(target, path) if *target == id && *path == home)),
+        "clicking Home did not open it in the active pane"
+    );
+    assert!(harness.state.location.is_none());
+}
+
+#[test]
+fn path_bar_edits_a_location_that_enter_opens_and_escape_cancels() {
+    for confirm in [true, false] {
+        let mut harness = Harness::new(3);
+        harness.workspace.pane_mut().select(0, false, false);
+        harness.warm();
+        let selected = harness.workspace.pane().selected.clone();
+        harness.frame(vec![key(Key::L, true, false, Modifiers::COMMAND)]);
+        harness.frame(vec![key(Key::L, false, false, Modifiers::COMMAND)]);
+        assert!(
+            harness.state.dialog.is_none(),
+            "Go to folder opened a dialog"
+        );
+        assert!(
+            harness.state.location.is_some(),
+            "path bar did not start editing"
+        );
+        assert!(harness.ctx.text_edit_focused(), "location never took focus");
+        // The current path starts selected, so typing replaces it.
+        let (actions, _) = harness.frame(vec![egui::Event::Text("~/Downloads".into())]);
+        assert!(!actions.iter().any(file_action));
+        assert_eq!(harness.state.location.as_ref().unwrap().text, "~/Downloads");
+        let finish = if confirm { Key::Enter } else { Key::Escape };
+        let (actions, _) = harness.frame(vec![press(finish)]);
+        harness.frame(vec![release(finish)]);
+        assert_eq!(
+            location_actions(&actions),
+            if confirm {
+                vec!["~/Downloads".to_owned()]
+            } else {
+                Vec::new()
+            }
+        );
+        assert!(
+            !actions.iter().any(file_action),
+            "{finish:?} reached the files"
+        );
+        assert!(
+            harness.state.location.is_none(),
+            "{finish:?} left the editor open"
+        );
+        assert_eq!(harness.workspace.pane().selected, selected);
+    }
+}
+
+#[test]
+fn location_edit_ends_when_its_pane_changes_folder() {
+    let mut harness = Harness::new(3);
+    harness.warm();
+    harness.frame(vec![key(Key::L, true, false, Modifiers::COMMAND)]);
+    assert!(harness.state.location.is_some());
+    let elsewhere = harness.workspace.pane().path.join("elsewhere");
+    harness.workspace.pane_mut().navigate(elsewhere);
+    let (actions, _) = harness.frame(vec![press(Key::Enter)]);
+    assert!(harness.state.location.is_none());
+    assert!(location_actions(&actions).is_empty());
+}
+
+#[test]
+fn breadcrumbs_start_at_home_or_the_file_system_root() {
+    let (home, outside) = if cfg!(windows) {
+        (
+            PathBuf::from("C:\\Users\\Neptune"),
+            PathBuf::from("D:\\srv\\Media"),
+        )
+    } else {
+        (PathBuf::from("/home/neptune"), PathBuf::from("/srv/Media"))
+    };
+    let labels = |path: &std::path::Path| {
+        breadcrumbs(path, &home)
+            .into_iter()
+            .map(|(label, _, _)| label)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        labels(&home.join("Documents").join("Projects")),
+        ["Home", "Documents", "Projects"]
+    );
+    assert_eq!(labels(&home), ["Home"]);
+    assert_eq!(labels(&outside), ["File system", "srv", "Media"]);
+}
+
 #[test]
 fn opening_or_repeated_enter_cannot_confirm_new_item_or_trash() {
     for trash in [false, true] {

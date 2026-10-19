@@ -1,12 +1,12 @@
 //! Window chrome in Neptune Terminal's arrangement: a full-height source list,
-//! a toolbar that names the folder in view, and a tab strip that appears only
+//! a toolbar with a path bar for the folder in view, and a tab strip that appears only
 //! when there is more than one tab to tell apart.
-use super::{Action, Dialog, UiState, name};
+use super::{Action, Dialog, UiState, breadcrumbs, name};
 use crate::{
     config::{Config, ViewMode},
     controls,
     icons::{self, Icon},
-    model::Workspace,
+    model::{Pane, Workspace},
     theme::{self, Palette, metrics},
 };
 use eframe::egui::{
@@ -487,7 +487,7 @@ fn place_row(ui: &mut Ui, p: Palette, icon: Icon, label: &str, selected: bool) -
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
-/// The toolbar names the folder in view and holds navigation, search, views
+/// The toolbar shows the folder in view as a path bar and holds navigation, search, views
 /// and window-wide actions. `leading` is where its own content may begin.
 #[allow(clippy::too_many_arguments)]
 pub fn toolbar(
@@ -587,21 +587,27 @@ pub fn toolbar(
     );
     let right = cluster - 10.0;
 
-    // The search field stays centred on the toolbar while there is room, as
-    // Terminal's command field does; otherwise it trails the title.
-    let width = (rect.width() * 0.32).clamp(200.0, 300.0);
-    let centred = Rect::from_center_size(rect.center(), vec2(width, metrics::CONTROL_HEIGHT));
-    let field = if centred.left() >= title_left + 120.0 && centred.right() <= right {
-        centred
-    } else {
-        let width = (right - title_left - 90.0).clamp(0.0, 220.0);
+    // The search field trails the toolbar, so the path bar keeps the room
+    // between navigation and the actions.
+    let height = metrics::CONTROL_HEIGHT;
+    let width = (rect.width() * 0.26)
+        .clamp(180.0, 260.0)
+        .min(right - title_left - 160.0);
+    let search = (width >= 100.0).then(|| {
         Rect::from_min_max(
-            pos2(right - width, middle - metrics::CONTROL_HEIGHT * 0.5),
-            pos2(right, middle + metrics::CONTROL_HEIGHT * 0.5),
+            pos2(right - width, middle - height * 0.5),
+            pos2(right, middle + height * 0.5),
         )
-    };
+    });
+    let bar = Rect::from_min_max(
+        pos2(title_left, middle - height * 0.5),
+        pos2(
+            search.map_or(right, |field| field.left() - 8.0),
+            middle + height * 0.5,
+        ),
+    );
     let pane = workspace.pane_mut();
-    if field.width() >= 90.0 {
+    if let Some(field) = search {
         let response = controls::place(
             ui,
             field,
@@ -642,8 +648,20 @@ pub fn toolbar(
             actions.push(Action::Search(pane.id));
         }
     }
-    let budget = field.left().min(right) - title_left - 14.0;
-    if budget >= 40.0 {
+    // A location being typed belongs to the folder it began in.
+    state.path_bar = bar.width() >= 120.0;
+    if state
+        .location
+        .as_ref()
+        .is_some_and(|edit| !state.path_bar || edit.pane != pane.id || edit.path != pane.path)
+    {
+        state.location = None;
+    }
+    if state.location.is_some() {
+        location_field(ui, bar, state, p, actions);
+    } else if state.path_bar {
+        path_bar(ui, bar, pane, state, p, actions);
+    } else if bar.width() >= 40.0 {
         controls::galley_at(
             ui.painter(),
             pos2(title_left, middle),
@@ -652,10 +670,301 @@ pub fn toolbar(
                 &name(&pane.path),
                 theme::medium(13.0),
                 p.fg,
-                budget,
+                bar.width(),
             ),
         );
     }
+}
+
+/// The folder in view as a path: each enclosing folder opens with a click,
+/// and a click anywhere else turns the bar into an editable location.
+fn path_bar(
+    ui: &mut Ui,
+    rect: Rect,
+    pane: &Pane,
+    state: &mut UiState,
+    p: Palette,
+    actions: &mut Vec<Action>,
+) {
+    const SEPARATOR: f32 = 14.0;
+    const MORE: f32 = 28.0;
+    let background = ui.interact(rect, ui.id().with("path-bar"), Sense::click());
+    background.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Edit location"));
+    controls::field_frame(ui, p, rect, location_id(pane.id), true);
+    let painter = ui.painter().clone();
+    if background.has_focus() {
+        controls::focus_ring(&painter, rect, metrics::CONTROL_RADIUS, p);
+    }
+    let middle = rect.center().y;
+    let parts = breadcrumbs(&pane.path, &state.home);
+    let style = |last: bool| {
+        if last {
+            (theme::medium(13.0), p.fg)
+        } else {
+            (theme::regular(13.0), p.secondary)
+        }
+    };
+    // Measure every crumb, then keep as many trailing ones as fit; the
+    // folders that do not fit wait behind a menu at the leading edge.
+    let measured = parts
+        .iter()
+        .enumerate()
+        .map(|(i, (label, _, _))| {
+            let (font, ink) = style(i + 1 == parts.len());
+            let galley = painter.layout_no_wrap(label.clone(), font, ink);
+            let width = galley.size().x + 16.0 + if i == 0 { 20.0 } else { 0.0 };
+            (galley, width)
+        })
+        .collect::<Vec<_>>();
+    let left = rect.left() + 4.0;
+    let right = rect.right() - 4.0;
+    let total = |from: usize| {
+        measured[from..].iter().map(|(_, w)| w).sum::<f32>()
+            + SEPARATOR * (parts.len() - from - 1) as f32
+            + if from > 0 { MORE + SEPARATOR } else { 0.0 }
+    };
+    let mut first = 0;
+    while first + 1 < parts.len() && total(first) > right - left {
+        first += 1;
+    }
+    let separator = |x: f32| {
+        painter.text(
+            pos2(x + SEPARATOR * 0.5, middle),
+            egui::Align2::CENTER_CENTER,
+            "/",
+            theme::regular(13.0),
+            p.muted,
+        );
+        x + SEPARATOR
+    };
+    let mut x = left;
+    if first > 0 {
+        let more = Rect::from_min_size(pos2(x, middle - 12.0), vec2(MORE, 24.0));
+        let response = ui.interact(more, ui.id().with("path-bar-more"), Sense::click());
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Button, true, "Show enclosing folders")
+        });
+        crumb_surface(&painter, &response, more, p);
+        painter.text(
+            more.center(),
+            egui::Align2::CENTER_CENTER,
+            "…",
+            theme::medium(13.0),
+            p.secondary,
+        );
+        let response = response
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text("Enclosing folders");
+        egui::Popup::menu(&response).show(|ui| {
+            controls::menu_layout(ui, 220.0);
+            for (label, icon, path) in &parts[..first] {
+                if controls::menu_item(ui, p, *icon, label, "", false) {
+                    actions.push(Action::Navigate(pane.id, path.clone()));
+                    ui.close();
+                }
+            }
+        });
+        x = separator(more.right());
+    }
+    for (i, (label, icon, path)) in parts.iter().enumerate().skip(first) {
+        let last = i + 1 == parts.len();
+        let (galley, width) = &measured[i];
+        let width = width.min(right - x);
+        if width < 28.0 {
+            break;
+        }
+        let crumb = Rect::from_min_size(pos2(x, middle - 12.0), vec2(width, 24.0));
+        // The folder in view is part of the bar: clicking it edits the path.
+        let response = (!last).then(|| {
+            let response = ui.interact(crumb, ui.id().with(("path-crumb", path)), Sense::click());
+            response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Button, true, format!("Go to {label}"))
+            });
+            crumb_surface(&painter, &response, crumb, p);
+            response
+        });
+        let mut text_left = crumb.left() + 8.0;
+        if i == 0 {
+            icons::paint(
+                &painter,
+                Rect::from_center_size(pos2(text_left + 7.0, middle), Vec2::splat(14.0)),
+                *icon,
+                if last { p.accent } else { p.secondary },
+            );
+            text_left += 20.0;
+        }
+        let room = crumb.right() - 8.0 - text_left;
+        let text = if galley.size().x > room {
+            let (font, ink) = style(last);
+            controls::elided(&painter, label, font, ink, room)
+        } else {
+            galley.clone()
+        };
+        controls::galley_at(&painter, pos2(text_left, middle), text);
+        x = crumb.right();
+        if !last {
+            x = separator(x);
+        }
+        let Some(response) = response else { continue };
+        if response.clicked() {
+            actions.push(Action::Navigate(pane.id, path.clone()));
+        } else if response.clicked_by(egui::PointerButton::Middle) {
+            actions.push(Action::NewTab(path.clone()));
+        }
+        response
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text(path.display().to_string())
+            .context_menu(|ui| {
+                controls::menu_layout(ui, 200.0);
+                if controls::menu_item(ui, p, Icon::Plus, "Open in new tab", "", false) {
+                    actions.push(Action::NewTab(path.clone()));
+                    ui.close();
+                }
+                if controls::menu_item(ui, p, Icon::Copy, "Copy path", "", false) {
+                    actions.push(Action::CopyPath(path.clone()));
+                    ui.close();
+                }
+            });
+    }
+    if background.on_hover_cursor(CursorIcon::Text).clicked() {
+        state.go_to_folder(pane);
+    }
+}
+
+fn crumb_surface(painter: &egui::Painter, response: &egui::Response, rect: Rect, p: Palette) {
+    if response.is_pointer_button_down_on() {
+        painter.rect_filled(rect, 6, p.pressed);
+    } else if response.hovered() {
+        painter.rect_filled(rect, 6, p.hover);
+    }
+    if response.has_focus() {
+        controls::focus_ring(painter, rect, 6, p);
+    }
+}
+
+fn location_id(pane: u64) -> egui::Id {
+    egui::Id::new(("location", pane))
+}
+
+/// The path bar as an editable location. Enter opens what was typed; Escape,
+/// the close button or a click elsewhere leaves the pane where it is.
+fn location_field(
+    ui: &mut Ui,
+    rect: Rect,
+    state: &mut UiState,
+    p: Palette,
+    actions: &mut Vec<Action>,
+) {
+    let Some(edit) = state.location.as_mut() else {
+        return;
+    };
+    let id = location_id(edit.pane);
+    controls::field_frame(ui, p, rect, id, true);
+    let inner = Rect::from_min_max(
+        pos2(rect.left() + 12.0, rect.top()),
+        pos2(rect.right() - 58.0, rect.bottom()),
+    );
+    let response = controls::place(
+        ui,
+        inner,
+        Layout::left_to_right(Align::Center),
+        ("location-text", id),
+        |ui| {
+            controls::bare_text_edit(
+                ui,
+                id,
+                &mut edit.text,
+                "Type a folder path",
+                13.0,
+                inner.width(),
+            )
+        },
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, "Location"));
+    if edit.focus {
+        edit.focus = false;
+        response.request_focus();
+        // The whole path starts selected, so typing replaces it.
+        if let Some(mut text) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+            text.cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(edit.text.chars().count()),
+                )));
+            text.store(ui.ctx(), response.id);
+        }
+    }
+    let middle = rect.center().y;
+    let clear = field_button(
+        ui,
+        pos2(rect.right() - 42.0, middle),
+        Icon::Eraser,
+        12.0,
+        "Clear location",
+        p,
+    );
+    let close = field_button(
+        ui,
+        pos2(rect.right() - 16.0, middle),
+        Icon::Close,
+        9.0,
+        "Stop editing location",
+        p,
+    );
+    let entered = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let typed = edit.text.trim().to_owned();
+    if entered && !typed.is_empty() {
+        actions.push(Action::Location(typed));
+        state.location = None;
+    } else if close.clicked() {
+        state.location = None;
+    } else if entered || clear.clicked() {
+        if clear.clicked() {
+            edit.text.clear();
+        }
+        edit.focus = true;
+    } else if !response.has_focus() && !edit.focus && !ui.input(|input| input.pointer.any_down()) {
+        // Escape or a click elsewhere.
+        state.location = None;
+    }
+}
+
+/// A small icon button inside a field's trailing edge.
+fn field_button(
+    ui: &mut Ui,
+    center: Pos2,
+    icon: Icon,
+    size: f32,
+    label: &str,
+    p: Palette,
+) -> egui::Response {
+    let target = Rect::from_center_size(center, Vec2::splat(22.0));
+    let response = ui.interact(
+        target,
+        ui.id().with(("field-button", label)),
+        Sense::click(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
+    let painter = ui.painter();
+    if response.hovered() || response.has_focus() {
+        painter.rect_filled(target.shrink(1.0), 6, p.hover);
+    }
+    if response.has_focus() {
+        controls::focus_ring(painter, target.shrink(1.0), 6, p);
+    }
+    icons::paint(
+        painter,
+        Rect::from_center_size(target.center(), Vec2::splat(size)),
+        icon,
+        if response.hovered() {
+            p.fg
+        } else {
+            p.secondary
+        },
+    );
+    response
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text(label)
 }
 
 /// Folder, view and window actions. Views and split move here when the
@@ -703,9 +1012,7 @@ fn more_menu(
             &controls::edit_shortcut("L"),
             false,
         ) {
-            state.open_dialog(Dialog::Location {
-                value: path.display().to_string(),
-            });
+            state.go_to_folder(workspace.pane());
             ui.close();
         }
         controls::menu_separator(ui, p);

@@ -267,12 +267,12 @@ class Review:
 
     def go(self, path, capture=None):
         self.command("l")
-        self.widget("Folder path", "textInput")
-        self.set_field("Folder path", path)
+        self.widget("Location", "textInput")
+        self.set_field("Location", path)
         if capture:
             self.shot(capture)
-        self.click("Go", "button")
-        self.wait("location dialog to close", lambda: not self.nodes("Close location dialog", "button"))
+        self.key("Enter")
+        self.wait("location editor to close", lambda: not self.nodes("Location", "textInput"))
         self.wait("saved active directory", lambda: Path(self.session()["tabs"][self.session()["active"]]["paths"][0]) == path)
 
     def scenario(self, name, callback):
@@ -420,7 +420,7 @@ class Review:
         self.shot("14-trash-confirmation-cancelled")
         self.click("Cancel", "button")
         self.check("trash cancellation preserves fixture", renamed.is_dir(), "Confirmation was cancelled; no item was sent to the OS Trash")
-        self.go(self.directory, capture="15-location-dialog")
+        self.go(self.directory, capture="15-location-editor")
 
     def preferences(self):
         self.go(self.directory)
