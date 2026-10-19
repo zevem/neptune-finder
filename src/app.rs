@@ -46,6 +46,9 @@ pub struct FinderApp {
 impl FinderApp {
     pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch) -> Self {
         crate::fonts::install(&cc.egui_ctx);
+        // Finder steps the zoom itself, so it is saved and named as it changes.
+        cc.egui_ctx
+            .options_mut(|options| options.zoom_with_keyboard = false);
         let home = directories::BaseDirs::new()
             .map(|d| d.home_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "C:\\" } else { "/" }));
@@ -216,6 +219,7 @@ impl FinderApp {
             }
             self.applied_hidden = self.config.show_hidden;
             crate::theme::apply(ctx, &self.config);
+            ctx.set_zoom_factor(self.config.window_zoom);
             self.ui.notice = boot.warning.map(ui::Notice::problem);
             self.initialized = true;
             self.reload_visible(ctx);
@@ -590,6 +594,8 @@ impl FinderApp {
             Action::PreferencesChanged => {
                 self.config.validate();
                 crate::theme::apply(ctx, &self.config);
+                // Reset preferences also returns the zoom to 100%.
+                ctx.set_zoom_factor(self.config.window_zoom);
                 if self.applied_hidden != self.config.show_hidden {
                     self.applied_hidden = self.config.show_hidden;
                     self.reload_visible(ctx);
@@ -599,6 +605,22 @@ impl FinderApp {
             Action::View(mode) => {
                 self.config.view = mode;
                 self.changed(ctx);
+            }
+            Action::Zoom(step) => {
+                let previous = self.config.window_zoom;
+                self.config.step_zoom(step);
+                if self.config.window_zoom != previous {
+                    ctx.set_zoom_factor(self.config.window_zoom);
+                    self.changed(ctx);
+                }
+                // At either end of the range the chip still answers, with the
+                // value kept.
+                self.ui.level = Some(crate::controls::Level {
+                    name: "Window zoom",
+                    value: format!("{:.0}%", self.config.window_zoom * 100.0),
+                    shown: ctx.input(|input| input.time),
+                });
+                ctx.request_repaint();
             }
             Action::Location(path) => {
                 let text = path.trim();

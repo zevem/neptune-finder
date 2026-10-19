@@ -103,6 +103,7 @@ sidebar = true
 sidebar_width = 216.0
 icon_size = 56.0
 row_height = 28.0
+window_zoom = 1.0
 restore_session = true
 favorites = []
 ```
@@ -131,6 +132,7 @@ and modal dialogs retain their own text/selection shortcuts.
 | Quick Look | Space |
 | Open selected item | Enter |
 | Preferences | Command+, |
+| Zoom in / out / actual size | Command+= or Command++ / Command+- / Command+0 |
 | Clear selection | Escape |
 
 The interface implements the core workflow above. Full Ubuntu Files/macOS
