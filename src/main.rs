@@ -114,6 +114,21 @@ fn run() -> Result<(), String> {
                 .map_err(|e| e.to_string())?,
             ),
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(
+            eframe::egui_wgpu::SurfaceConfig {
+                // Match Terminal: NVIDIA's FIFO acquire can block the UI thread
+                // for seconds after an idle/covered window on Linux hybrid
+                // graphics. The automatic mode uses Immediate/Mailbox where
+                // supported and retains FIFO as a fallback, without assuming
+                // Mailbox exists.
+                present_mode: if cfg!(target_os = "linux") {
+                    eframe::wgpu::PresentMode::AutoNoVsync
+                } else {
+                    eframe::wgpu::PresentMode::AutoVsync
+                },
+                ..eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY
+            },
+        ),
         ..Default::default()
     };
     eframe::run_native(

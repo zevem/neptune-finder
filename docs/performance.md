@@ -11,6 +11,14 @@ the visible one or two panes retain active snapshots. Large replaced snapshots
 are retired through a bounded worker path, keeping bulk destruction off frames. These choices create a measurable architecture; they do not establish
 that Finder is faster than another explorer.
 
+GPU swapchain acquisition runs synchronously on the UI thread, so frame CPU time
+alone does not establish responsiveness. Linux presents with wgpu's
+`AutoNoVsync`, matching Neptune Terminal's fix for an NVIDIA FIFO acquire that
+blocked the whole window for seconds after it sat idle behind other
+applications. Immediate presentation is selected where the surface offers it and
+can permit tearing on native X11; other operating systems keep `AutoVsync`.
+The stall was reproduced in Terminal under XWayland, not yet in Finder.
+
 ## What to measure
 
 | Measurement | Purpose |
