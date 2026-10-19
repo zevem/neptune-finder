@@ -3,7 +3,7 @@
 //! it is and what it holds.
 use super::{Action, Dialog, UiState, bytes, name};
 use crate::{
-    config::{Accent, Config, ViewMode},
+    config::{Accent, ColumnWidths, Config, ViewMode},
     controls::{self, ButtonKind},
     icons::{self, Icon},
     model::{Pane, Workspace},
@@ -30,7 +30,7 @@ pub fn panes(
     ui: &mut egui::Ui,
     stage: Rect,
     workspace: &mut Workspace,
-    config: &Config,
+    config: &mut Config,
     state: &mut UiState,
     p: Palette,
     actions: &mut Vec<Action>,
@@ -105,7 +105,7 @@ fn pane_ui(
     ui: &mut egui::Ui,
     rect: Rect,
     pane: &mut Pane,
-    config: &Config,
+    config: &mut Config,
     state: &mut UiState,
     p: Palette,
     focused: bool,
@@ -441,8 +441,27 @@ fn status_text(pane: &Pane, state: &UiState) -> String {
     text
 }
 
+/// The narrowest the Name column becomes before the others give way.
+const NAME_MIN: f32 = 120.0;
+
+/// The list's columns in Finder's order: field, label, whether the label
+/// trails, and the narrowest and widest the column may be.
+const COLUMNS: [(SortField, &str, bool, (f32, f32)); 4] = [
+    (SortField::Name, "Name", false, (NAME_MIN, f32::INFINITY)),
+    (
+        SortField::Modified,
+        "Date Modified",
+        false,
+        ColumnWidths::DATE_RANGE,
+    ),
+    (SortField::Size, "Size", true, ColumnWidths::SIZE_RANGE),
+    (SortField::Kind, "Kind", false, ColumnWidths::KIND_RANGE),
+];
+
 /// Columns shown at a pane width: name always; date, size and kind as room
-/// allows, in Finder's order.
+/// allows, in Finder's order. Name takes the room the others leave; when that
+/// is too little, they give way, the nearest first.
+#[derive(Clone, Copy)]
 struct Columns {
     name: f32,
     date: f32,
@@ -450,15 +469,77 @@ struct Columns {
     kind: f32,
 }
 impl Columns {
-    fn new(width: f32) -> Self {
-        let date = if width > 460.0 { 168.0 } else { 0.0 };
-        let kind = if width > 760.0 { 150.0 } else { 0.0 };
-        let size = if width > 340.0 { 78.0 } else { 0.0 };
-        Self {
+    fn new(width: f32, widths: ColumnWidths) -> Self {
+        let date = if width > 460.0 { widths.date } else { 0.0 };
+        let kind = if width > 760.0 { widths.kind } else { 0.0 };
+        let size = if width > 340.0 { widths.size } else { 0.0 };
+        let columns = Self {
             name: width - date - kind - size - 12.0,
             date,
             size,
             kind,
+        };
+        let short = NAME_MIN - columns.name;
+        if short > 0.0 {
+            columns.resized(1, short)
+        } else {
+            columns
+        }
+    }
+
+    fn widths(&self) -> [f32; 4] {
+        [self.name, self.date, self.size, self.kind]
+    }
+
+    /// Moves the divider before column `right` by `delta`. The column it
+    /// leaves widens; the columns it moves toward give way, the nearest
+    /// first, down to their minimums. Hidden columns stay hidden.
+    fn resized(&self, right: usize, delta: f32) -> Self {
+        let mut widths = self.widths();
+        let toward = |step: usize| {
+            if delta > 0.0 {
+                Some(right + step).filter(|&i| i < COLUMNS.len())
+            } else {
+                right.checked_sub(step + 1)
+            }
+        };
+        let slack = |widths: &[f32; 4], i: usize| {
+            let (min, _) = COLUMNS[i].3;
+            (widths[i] - min).max(0.0)
+        };
+        let grow = if delta > 0.0 {
+            (0..right).rev().find(|&i| widths[i] > 0.0).unwrap_or(0)
+        } else {
+            right
+        };
+        let room: f32 = (0..COLUMNS.len())
+            .filter_map(toward)
+            .map(|i| slack(&widths, i))
+            .sum();
+        let (_, max) = COLUMNS[grow].3;
+        let mut amount = delta.abs().min(max - widths[grow]).min(room).max(0.0);
+        widths[grow] += amount;
+        for i in (0..COLUMNS.len()).filter_map(toward) {
+            let give = amount.min(slack(&widths, i));
+            widths[i] -= give;
+            amount -= give;
+        }
+        let [name, date, size, kind] = widths;
+        Self {
+            name,
+            date,
+            size,
+            kind,
+        }
+    }
+
+    /// The widths to save: those shown here, keeping hidden columns' own.
+    fn saved(&self, widths: ColumnWidths) -> ColumnWidths {
+        let shown = |width: f32, saved: f32| if width > 0.0 { width } else { saved };
+        ColumnWidths {
+            date: shown(self.date, widths.date),
+            size: shown(self.size, widths.size),
+            kind: shown(self.kind, widths.kind),
         }
     }
 }
@@ -466,22 +547,41 @@ impl Columns {
 fn list(
     ui: &mut egui::Ui,
     pane: &mut Pane,
-    config: &Config,
+    config: &mut Config,
     state: &mut UiState,
     p: Palette,
     focused: bool,
     actions: &mut Vec<Action>,
 ) {
     let width = ui.available_width();
-    let columns = Columns::new(width);
+    let mut columns = Columns::new(width, config.column_widths);
     let (head, _) = ui.allocate_exact_size(vec2(width, HEADER), Sense::hover());
+    // A dragged divider moves under the pointer before anything is laid out,
+    // so the header and rows follow it in the same frame. It moves from where
+    // the columns stood when it was pressed, so dragging back undoes a push,
+    // and in whole physical pixels.
+    let pixels = ui.ctx().pixels_per_point();
+    for (right, &(_, label, _, _)) in COLUMNS.iter().enumerate().skip(1) {
+        let id = ui.id().with(("resize", label));
+        if ui.ctx().drag_started_id() == Some(id) {
+            let origin = ui.input(|i| i.pointer.press_origin().map(|pos| pos.x));
+            if let Some(origin) = origin {
+                ui.data_mut(|data| data.insert_temp(id, (columns, origin)));
+            }
+        }
+        if ui.ctx().is_being_dragged(id)
+            && columns.widths()[right] > 0.0
+            && let Some((start, origin)) = ui.data(|data| data.get_temp::<(Columns, f32)>(id))
+            && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+        {
+            let delta = ((pointer.x - origin) * pixels).round() / pixels;
+            columns = start.resized(right, delta);
+            config.column_widths = columns.saved(config.column_widths);
+        }
+    }
+    let widths = columns.widths();
     let mut x = head.left() + 6.0;
-    for (field, label, column, trailing) in [
-        (SortField::Name, "Name", columns.name, false),
-        (SortField::Modified, "Date Modified", columns.date, false),
-        (SortField::Size, "Size", columns.size, true),
-        (SortField::Kind, "Kind", columns.kind, false),
-    ] {
+    for (&(field, label, trailing, _), column) in COLUMNS.iter().zip(widths) {
         if column <= 0.0 {
             continue;
         }
@@ -498,6 +598,59 @@ fn list(
             actions,
         );
         x += column;
+    }
+    // Each divider trades width between the columns either side of it. The
+    // widths are saved on release, and a double click restores the defaults.
+    // Dividers have no keyboard behaviour, so they stay out of the focus order.
+    for (right, &(_, label, _, _)) in COLUMNS.iter().enumerate().skip(1) {
+        if widths[right] <= 0.0 {
+            continue;
+        }
+        let x = head.left() + 6.0 + widths[..right].iter().sum::<f32>();
+        let left = (0..right).rev().find(|&i| widths[i] > 0.0).unwrap_or(0);
+        let resize = ui
+            .interact(
+                Rect::from_center_size(pos2(x, head.center().y), vec2(8.0, HEADER)),
+                ui.id().with(("resize", label)),
+                Sense::CLICK | Sense::DRAG,
+            )
+            .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
+        resize.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::ResizeHandle,
+                true,
+                format!("Resize {} column", COLUMNS[left].1),
+            )
+        });
+        if resize.drag_stopped() {
+            ui.data_mut(|data| data.remove::<(Columns, f32)>(resize.id));
+            actions.push(Action::PreferencesChanged);
+        }
+        if resize.double_clicked() || resize.triple_clicked() {
+            config.column_widths = ColumnWidths::default();
+            actions.push(Action::PreferencesChanged);
+        }
+        let grip = controls::animate(
+            ui.ctx(),
+            resize.id.with("grip"),
+            resize.hovered() || resize.dragged(),
+            0.12,
+        );
+        if grip > 0.0 {
+            ui.painter().line_segment(
+                [
+                    pos2(x, head.center().y - 8.0),
+                    pos2(x, head.center().y + 8.0),
+                ],
+                Stroke::new(
+                    2.0,
+                    theme::tint(
+                        if resize.dragged() { p.accent } else { p.muted },
+                        grip * 0.8,
+                    ),
+                ),
+            );
+        }
     }
     ui.painter().line_segment(
         [

@@ -12,11 +12,13 @@ Folder (in the toolbar's More menu) to enter a location. The
 location accepts absolute paths, paths relative to the active pane, `~` and
 `~/…`. Back and Forward use that pane's own history; Up opens its parent.
 
-List view shows sortable file details. Icon view uses the same entries and
-selection with adjustable icon size. Folders appear first; hidden files are
-configurable. Each pane's path bar shows where it is and how many items it
-holds or has selected. The sidebar yields space in narrow windows; toggle it
-from the toolbar or with Command+Shift+B (⌘B on macOS), and drag its trailing
+List view shows sortable file details; drag the dividers between column
+headers to resize them, or double-click one to restore the default widths.
+Icon view uses the same entries and selection with adjustable icon size.
+Folders appear first; hidden files are configurable. Each pane's path bar
+shows where it is and how many items it holds or has selected. The sidebar
+yields space in narrow windows; toggle it from the toolbar or with
+Command+Shift+B (⌘B on macOS), and drag its trailing
 edge to resize it. A loading state
 appears while a worker reads a directory, and unavailable locations show errors
 without freezing navigation.
@@ -82,7 +84,7 @@ the file view.
 Preferences is laid out like Neptune Terminal's: General, Appearance and Files
 panes in a source list. Appearance offers Graphite, Dusk and Light using the
 exact Neptune Terminal materials, plus nine accent choices. View mode, hidden
-files, sidebar visibility/width, icon size, row density,
+files, sidebar visibility/width, list column widths, icon size, row density,
 session restoration
 and favorites are saved in Finder's own configuration/session storage.
 
@@ -106,6 +108,11 @@ row_height = 28.0
 window_zoom = 1.0
 restore_session = true
 favorites = []
+
+[column_widths]
+date = 168.0
+size = 78.0
+kind = 150.0
 ```
 
 ## Keyboard shortcuts

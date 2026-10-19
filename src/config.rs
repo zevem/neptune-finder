@@ -41,6 +41,38 @@ pub enum ZoomStep {
     Reset,
 }
 
+/// List view column widths. Name takes the room the others leave.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ColumnWidths {
+    pub date: f32,
+    pub size: f32,
+    pub kind: f32,
+}
+impl Default for ColumnWidths {
+    fn default() -> Self {
+        Self {
+            date: 168.0,
+            size: 78.0,
+            kind: 150.0,
+        }
+    }
+}
+impl ColumnWidths {
+    pub const DATE_RANGE: (f32, f32) = (96.0, 480.0);
+    pub const SIZE_RANGE: (f32, f32) = (64.0, 240.0);
+    pub const KIND_RANGE: (f32, f32) = (72.0, 480.0);
+    fn validate(&mut self) {
+        let fallback = Self::default();
+        let (low, high) = Self::DATE_RANGE;
+        self.date = bounded(self.date, low, high, fallback.date);
+        let (low, high) = Self::SIZE_RANGE;
+        self.size = bounded(self.size, low, high, fallback.size);
+        let (low, high) = Self::KIND_RANGE;
+        self.kind = bounded(self.kind, low, high, fallback.kind);
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -56,6 +88,7 @@ pub struct Config {
     pub restore_session: bool,
     #[serde(with = "crate::path_serde::many")]
     pub favorites: Vec<PathBuf>,
+    pub column_widths: ColumnWidths,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -71,6 +104,7 @@ impl Default for Config {
             window_zoom: Self::WINDOW_ZOOM,
             restore_session: true,
             favorites: Vec::new(),
+            column_widths: ColumnWidths::default(),
         }
     }
 }
@@ -94,6 +128,7 @@ impl Config {
         self.row_height = bounded(self.row_height, low, high, Self::ROW_HEIGHT);
         let (low, high) = Self::WINDOW_ZOOM_RANGE;
         self.window_zoom = bounded(self.window_zoom, low, high, Self::WINDOW_ZOOM);
+        self.column_widths.validate();
         self.favorites.truncate(64);
         self.favorites.retain(|path| path.is_absolute());
     }
