@@ -583,6 +583,7 @@ fn icon_view_asks_for_visible_files_only_and_draws_their_thumbnails() {
                 image: egui::ColorImage::filled([8, 8], egui::Color32::WHITE),
                 opaque: true,
             }),
+            dimensions: None,
         },
     );
     let (_, output) = harness.frame(Vec::new());
@@ -1849,4 +1850,232 @@ fn a_narrow_window_opens_the_sidebar_over_files_and_closes_it_after_a_choice() {
             .iter()
             .any(|a| matches!(a, Action::PreferencesChanged))
     );
+}
+
+/// Whether the frame's output says `text`: a control's name, or the text
+/// of a label, which AccessKit carries as its value.
+fn says(output: &egui::FullOutput, text: &str) -> bool {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .is_some_and(|update| {
+            update.nodes.iter().any(|(_, node)| {
+                node.bounds().is_some()
+                    && (node.label() == Some(text) || node.value() == Some(text))
+            })
+        })
+}
+
+/// Terminal's right panel chord.
+fn info_chord(pressed: bool) -> egui::Event {
+    let chord = if cfg!(target_os = "macos") {
+        Modifiers::COMMAND
+    } else {
+        Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    key(Key::O, pressed, false, chord)
+}
+
+/// The rightmost edge of the visible file rows.
+fn files_right(harness: &Harness) -> f32 {
+    harness
+        .item_rects()
+        .iter()
+        .map(|rect| rect.right())
+        .fold(f32::MIN, f32::max)
+}
+
+fn settle(harness: &mut Harness, size: Vec2) -> egui::FullOutput {
+    let mut last = None;
+    for _ in 0..20 {
+        last = Some(harness.frame_at(Vec::new(), size, None).1);
+    }
+    last.unwrap()
+}
+
+#[test]
+fn the_info_panel_toggles_beside_the_files_and_follows_the_selection() {
+    let wide = vec2(1_024.0, 720.0);
+    let mut harness = Harness::new(20);
+    harness.ctx.enable_accesskit();
+    let output = settle(&mut harness, wide);
+    assert!(widget_center(&output, "Info panel").is_none());
+    assert!(widget_center(&output, "Toggle info panel").is_some());
+    let full = files_right(&harness);
+
+    // The chord opens it and saves the choice; the files give it room.
+    let (actions, _) = harness.frame_at(vec![info_chord(true)], wide, None);
+    assert!(harness.config.info_panel);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::PreferencesChanged))
+    );
+    harness.frame_at(vec![info_chord(false)], wide, None);
+    let output = settle(&mut harness, wide);
+    assert!(widget_center(&output, "Info panel").is_some());
+    let beside = files_right(&harness);
+    assert!(
+        (full - beside - Config::INFO_PANEL_WIDTH).abs() <= theme::metrics::GUTTER + 1.0,
+        "files ended at {beside}, from {full}"
+    );
+
+    // With nothing selected it describes the folder and reads nothing.
+    assert!(says(&output, "Select an item to see its details."));
+    assert!(widget_center(&output, "New folder").is_some());
+    assert!(harness.state.info_subject.is_none());
+
+    // One item: its name, details and quick actions, read by the app.
+    harness.workspace.pane_mut().select(3, false, false);
+    let entry = harness.workspace.pane().entries[3].clone();
+    let output = settle(&mut harness, wide);
+    assert_eq!(
+        harness.state.info_subject,
+        Some((entry.path.clone(), entry.modified))
+    );
+    assert!(says(&output, &entry.name));
+    assert!(says(&output, "Size: 3 B"));
+    assert!(says(&output, "Created: —"));
+
+    // Its properties fill in once read; another item's never do.
+    let read = || {
+        Ok(finder_core::Properties {
+            entry: entry.clone(),
+            created: None,
+            link_target: None,
+            permissions: Some(finder_core::Permissions::ReadOnly(false)),
+            available_space: None,
+            contents: None,
+        })
+    };
+    let other = harness.workspace.pane().entries[4].path.clone();
+    harness.state.info_read = Some((other, read()));
+    let output = settle(&mut harness, wide);
+    assert!(says(&output, "Your access: —"));
+    harness.state.info_read = Some((entry.path.clone(), read()));
+    let output = settle(&mut harness, wide);
+    assert!(says(&output, "Your access: Read and write"));
+    assert!(says(&output, "Created: Unavailable"));
+
+    // A quick action keeps the item it was pressed for.
+    let rename = widget_center(&output, "Rename").expect("Rename quick action");
+    for events in click_events(rename) {
+        harness.frame_at(events, wide, None);
+    }
+    assert!(matches!(
+        &harness.state.dialog,
+        Some(Dialog::Rename { source, .. }) if *source == entry.path
+    ));
+    harness.state.dialog = None;
+
+    // Several items are counted, not read.
+    harness.workspace.pane_mut().select(5, true, false);
+    let output = settle(&mut harness, wide);
+    assert!(harness.state.info_subject.is_none());
+    assert!(says(&output, "2 items"));
+    let trash = widget_center(&output, "Move to Trash").expect("Trash quick action");
+    for events in click_events(trash) {
+        harness.frame_at(events, wide, None);
+    }
+    assert!(matches!(
+        &harness.state.dialog,
+        Some(Dialog::Trash { paths }) if paths.len() == 2 && paths.contains(&entry.path)
+    ));
+    harness.state.dialog = None;
+
+    // The toggle hides it again, and the panel stops asking.
+    let toggle = widget_center(&output, "Toggle info panel").unwrap();
+    harness.workspace.pane_mut().select(3, false, false);
+    for events in click_events(toggle) {
+        harness.frame_at(events, wide, None);
+    }
+    assert!(!harness.config.info_panel);
+    let output = settle(&mut harness, wide);
+    assert!(widget_center(&output, "Info panel").is_none());
+    assert!(harness.state.info_subject.is_none());
+    assert_eq!(files_right(&harness), full);
+}
+
+#[test]
+fn a_window_too_narrow_for_the_info_panel_keeps_its_files_and_no_toggle() {
+    let mut harness = Harness::new(20);
+    harness.ctx.enable_accesskit();
+    harness.config.info_panel = true;
+    harness.workspace.pane_mut().select(0, false, false);
+    let narrow = vec2(560.0, 480.0);
+    let output = settle(&mut harness, narrow);
+    assert!(!harness.state.info_available);
+    assert!(widget_center(&output, "Info panel").is_none());
+    assert!(widget_center(&output, "Toggle info panel").is_none());
+    assert!(harness.state.info_subject.is_none());
+    assert!(files_right(&harness) > 540.0);
+
+    // A wider window brings it back as it was left.
+    let output = settle(&mut harness, vec2(1_024.0, 720.0));
+    assert!(widget_center(&output, "Info panel").is_some());
+    assert!(harness.state.info_subject.is_some());
+    assert!(harness.config.info_panel);
+}
+
+#[test]
+fn the_info_panel_does_not_call_an_unreadable_folder_empty() {
+    let wide = vec2(1_024.0, 720.0);
+    let mut harness = Harness::new(4);
+    harness.ctx.enable_accesskit();
+    harness.config.info_panel = true;
+    harness.workspace.pane_mut().entries[1].kind = EntryKind::Directory;
+    harness.workspace.pane_mut().select(1, false, false);
+    let entry = harness.workspace.pane().entries[1].clone();
+    let read = |contents| {
+        let properties = finder_core::Properties {
+            entry: entry.clone(),
+            created: None,
+            link_target: None,
+            permissions: None,
+            available_space: None,
+            contents: Some(contents),
+        };
+        Some((entry.path.clone(), Ok(properties)))
+    };
+    harness.state.info_read = read(finder_core::Contents {
+        complete: true,
+        partial: true,
+        ..Default::default()
+    });
+    let output = settle(&mut harness, wide);
+    assert!(says(&output, "Items: None readable"));
+    assert!(says(&output, "Size: Unavailable"));
+
+    // A folder that was read and holds nothing is empty.
+    harness.state.info_read = read(finder_core::Contents {
+        complete: true,
+        ..Default::default()
+    });
+    let output = settle(&mut harness, wide);
+    assert!(says(&output, "Items: 0"));
+    assert!(says(&output, "Size: 0 B"));
+}
+
+#[test]
+fn the_info_panel_asks_for_a_larger_measured_picture_of_its_file_only() {
+    let mut harness = Harness::new(4);
+    harness.config.info_panel = true;
+    let image = harness.workspace.pane().path.join("photo.png");
+    harness.workspace.pane_mut().entries[2].path = image.clone();
+    harness.workspace.pane_mut().entries[1].kind = EntryKind::Directory;
+    harness.workspace.pane_mut().select(2, false, false);
+    settle(&mut harness, vec2(1_024.0, 720.0));
+    harness.frame(Vec::new());
+    let wanted = harness.state.info_picture.end_frame().expect("a picture");
+    assert_eq!(wanted.path, image);
+    assert!(wanted.measure);
+    assert!(wanted.pixels >= 256, "{} pixels", wanted.pixels);
+    // List view draws no thumbnails, so only the panel asks.
+    assert!(harness.state.thumbnails.end_frame().is_empty());
+
+    // A folder has no picture.
+    harness.workspace.pane_mut().select(1, false, false);
+    harness.frame(Vec::new());
+    assert!(harness.state.info_picture.end_frame().is_none());
 }

@@ -32,7 +32,9 @@ shows where it is and how many items it holds or has selected. Toggle the
 sidebar from the toolbar or with Command+Shift+B (⌘B on macOS), and drag its
 trailing edge to resize it. In narrow windows it yields its space to files;
 the same button or shortcut then opens it over the files, and it closes again
-once you choose a place, click outside it or press Escape. A loading state
+once you choose a place, click outside it or press Escape. The info panel (see
+[Info panel](#info-panel)) opens at the trailing edge from the toolbar's last
+button or with Command+Shift+O (⌘O on macOS). A loading state
 appears while a worker reads a directory, and unavailable locations show errors
 without freezing navigation.
 
@@ -150,12 +152,39 @@ regular files counted, so a hard-linked file counts each time it appears.
 For an item outside the pane's folder, such as a recursive search result,
 Open Parent Folder shows that folder with the item selected.
 
+## Info panel
+
+The info panel describes the active pane's selection without opening
+anything. One selected item shows its thumbnail or kind glyph, name, kind,
+size, image dimensions (PNG, JPEG, GIF, WebP and BMP, upright as the camera
+recorded them), where it is, what you may do with it, and when it was
+modified and created. A folder also shows how many items it holds, their total
+size and the free space on its volume; the count runs on a worker exactly as
+Properties counts, stops when the selection changes or the panel closes, and
+says when it is incomplete. A link shows its target. With nothing selected
+the panel names the folder in view and what it holds; with several items
+selected it says how many.
+
+Its quick actions act on what it shows: open or extract, Quick Look (or pin a
+folder to the sidebar), rename, copy the path, Properties and Move to Trash
+for one item; copy, cut, compress and Move to Trash for several; and a new
+folder, pinning, the path and Properties for the folder in view. For a search
+result outside the pane's folder, Open Parent Folder beside its location shows
+that folder with the item selected.
+
+Drag the panel's leading edge to resize it, or double-click it to restore the
+default width. Pictures come from the same bounded thumbnail workers as icon
+view, at the panel's size. The panel needs room beside the files: in a window
+too narrow for both it is hidden, along with its toggle, and returns when the
+window is wider.
+
 ## Preferences and saved state
 
 Preferences is laid out like Neptune Terminal's: General, Appearance and Files
 panes in a source list. Appearance offers Graphite, Dusk and Light using the
 exact Neptune Terminal materials, plus nine accent choices. View mode, hidden
-files, sidebar visibility/width, list column widths, icon size, row density,
+files, sidebar visibility/width, info panel visibility/width, list column
+widths, icon size, row density,
 session restoration
 and favorites are saved in Finder's own configuration/session storage.
 
@@ -174,6 +203,8 @@ view = "list"
 show_hidden = false
 sidebar = true
 sidebar_width = 216.0
+info_panel = false
+info_panel_width = 300.0
 icon_size = 56.0
 row_height = 28.0
 window_zoom = 1.0
@@ -198,6 +229,7 @@ and modal dialogs retain their own text/selection shortcuts.
 | New tab / close tab | Command+T / Command+W |
 | Toggle split view | Command+\\ |
 | Toggle sidebar | Command+Shift+B; ⌘B on macOS |
+| Toggle info panel | Command+Shift+O; ⌘O on macOS |
 | Back / Forward / Up | Alt+Left / Alt+Right / Alt+Up |
 | Refresh | F5 or Command+R |
 | Icon view / list view | Command+1 / Command+2 |

@@ -14,7 +14,7 @@ use finder_operations::{Operation, Operations};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 pub struct FinderApp {
@@ -26,6 +26,12 @@ pub struct FinderApp {
     operations: Operations,
     previews: Previews,
     inspector: Inspector,
+    /// The info panel's own properties worker, so the panel and the
+    /// Properties sheet never supersede each other's reads.
+    info_inspector: Inspector,
+    /// The item the info panel was last read for, as listed.
+    info_subject: Option<(PathBuf, Option<SystemTime>)>,
+    info_generation: u64,
     thumbnails: Thumbnails,
     /// The thumbnails the workers were last asked for.
     thumbnail_requests: Vec<thumbnails::Key>,
@@ -82,6 +88,8 @@ impl FinderApp {
         let wake = cc.egui_ctx.clone();
         let inspector = Inspector::new(move || wake.request_repaint());
         let wake = cc.egui_ctx.clone();
+        let info_inspector = Inspector::new(move || wake.request_repaint());
+        let wake = cc.egui_ctx.clone();
         let thumbnails = Thumbnails::new(move || wake.request_repaint());
         let wake = cc.egui_ctx.clone();
         let watches = Watches::new(move || wake.request_repaint());
@@ -111,6 +119,9 @@ impl FinderApp {
             operations,
             previews,
             inspector,
+            info_inspector,
+            info_subject: None,
+            info_generation: 0,
             thumbnails,
             thumbnail_requests: Vec::new(),
             watches,
@@ -344,8 +355,17 @@ impl FinderApp {
         {
             self.ui.properties = Some(result.result);
         }
+        if let Some(result) = self.info_inspector.poll()
+            && result.generation == self.info_generation
+        {
+            self.ui.info_read = Some((result.path, result.result));
+        }
         for thumbnail in self.thumbnails.poll() {
-            self.ui.thumbnails.insert(ctx, thumbnail);
+            if thumbnail.key.measure {
+                self.ui.info_picture.insert(ctx, thumbnail);
+            } else {
+                self.ui.thumbnails.insert(ctx, thumbnail);
+            }
         }
         if let Some(error) = self.storage.poll_error() {
             self.ui.notice = Some(ui::Notice::problem(error));
@@ -719,6 +739,30 @@ impl FinderApp {
             }
         }
     }
+    /// Reads the properties of the item the info panel shows. Another item
+    /// supersedes the read, and a hidden panel or one describing no single
+    /// item stops it, including a folder still being counted.
+    fn follow_info(&mut self) {
+        if self.ui.info_subject == self.info_subject {
+            return;
+        }
+        let previous = self.info_subject.take();
+        self.info_subject = self.ui.info_subject.clone();
+        match &self.info_subject {
+            Some((path, _)) => {
+                // A changed item keeps its last read until the new one comes.
+                if previous.is_none_or(|(old, _)| &old != path) {
+                    self.ui.info_read = None;
+                }
+                self.info_generation = self.info_inspector.request(path.clone());
+            }
+            None => {
+                self.info_inspector.cancel();
+                self.info_generation = 0;
+                self.ui.info_read = None;
+            }
+        }
+    }
     fn close(&mut self, ctx: &egui::Context) {
         if self.busy.is_empty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -799,8 +843,10 @@ impl eframe::App for FinderApp {
             &mut actions,
         );
         // Ask only when the files on screen change; each request replaces the
-        // queue, so files scrolled away are never read.
-        let wanted = self.ui.thumbnails.end_frame();
+        // queue, so files scrolled away are never read. The info panel's
+        // picture comes first.
+        let mut wanted = Vec::from_iter(self.ui.info_picture.end_frame());
+        wanted.extend(self.ui.thumbnails.end_frame());
         if wanted != self.thumbnail_requests {
             self.thumbnails.request(&wanted);
             self.thumbnail_requests = wanted;
@@ -810,6 +856,7 @@ impl eframe::App for FinderApp {
                 self.dispatch(action, &ctx);
             }
         }
+        self.follow_info();
         // Closing Properties stops a count that may still be walking a large
         // folder.
         if self.properties_generation != 0

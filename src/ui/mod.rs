@@ -2,6 +2,7 @@
 mod chrome;
 mod content;
 mod dialogs;
+mod info;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -161,6 +162,18 @@ pub struct UiState {
     /// The sidebar is open over the files of a window too narrow to keep it
     /// beside them. It is never saved; the docked preference stays as it was.
     pub sidebar_overlay: bool,
+    /// Whether the window had room for the info panel in this frame.
+    pub info_available: bool,
+    /// The info panel's width while its leading edge is dragged.
+    pub info_drag: Option<f32>,
+    /// The item the info panel describes, as listed, for the app to read its
+    /// properties; `None` while it describes no single item.
+    pub info_subject: Option<(PathBuf, Option<std::time::SystemTime>)>,
+    /// The newest properties read for the info panel, and of which item.
+    pub info_read: Option<(PathBuf, Result<finder_core::Properties, String>)>,
+    pub info_picture: crate::thumbnails::Single,
+    /// Where the info panel last found its item in the pane's entries.
+    pub info_index: Option<usize>,
     /// The Preferences pane in view while the app runs.
     pub preferences_pane: dialogs::PreferencesPane,
     pub file_widgets: std::collections::HashSet<egui::Id>,
@@ -231,6 +244,12 @@ impl UiState {
             path_bar: false,
             sidebar_drag: None,
             sidebar_overlay: false,
+            info_available: false,
+            info_drag: None,
+            info_subject: None,
+            info_read: None,
+            info_picture: Default::default(),
+            info_index: None,
             preferences_pane: dialogs::PreferencesPane::General,
             file_widgets: Default::default(),
             file_owners: Default::default(),
@@ -295,6 +314,36 @@ pub fn show(
         if available { 0.0 } else { SIDEBAR_SLIDE },
         egui::emath::easing::cubic_out,
     );
+    let width = state
+        .sidebar_drag
+        .unwrap_or(config.sidebar_width)
+        .clamp(chrome::SIDEBAR_WIDTH.0, chrome::SIDEBAR_WIDTH.1);
+    // The info panel takes the trailing edge as the sidebar takes the
+    // leading one, leaving the files a usable width between them. In a
+    // window too narrow for it, it is gone at once, whatever its toggle says.
+    let (low, high) = Config::INFO_PANEL_RANGE;
+    let docked = if config.sidebar && available {
+        width
+    } else {
+        0.0
+    };
+    let info_width = state
+        .info_drag
+        .unwrap_or(config.info_panel_width)
+        .clamp(low, high)
+        .min(bounds.width() - docked - info::MIN_STAGE)
+        .round();
+    state.info_available = info_width >= low;
+    let info_reveal = ctx.animate_bool_with_time_and_easing(
+        egui::Id::new("finder-info-reveal").with(ctx.viewport_id()),
+        config.info_panel && state.info_available,
+        if state.info_available {
+            SIDEBAR_SLIDE
+        } else {
+            0.0
+        },
+        egui::emath::easing::cubic_out,
+    );
     keyboard(&ctx, workspace, config, state, available, actions);
     state.file_widgets.clear();
     state.file_owners.clear();
@@ -304,10 +353,6 @@ pub fn show(
     // fills of their own, so the transparent corners stay clear.
     ui.painter().rect_filled(bounds, radius, p.chrome);
 
-    let width = state
-        .sidebar_drag
-        .unwrap_or(config.sidebar_width)
-        .clamp(chrome::SIDEBAR_WIDTH.0, chrome::SIDEBAR_WIDTH.1);
     let edge = (width * reveal).round();
     if edge > 0.0 {
         let side = Rect::from_min_size(
@@ -348,21 +393,42 @@ pub fn show(
     let gutter = theme::metrics::GUTTER;
     let mut top = toolbar.bottom();
     let left = bounds.left() + edge.max(gutter);
+    let info_edge = (info_width * info_reveal).round();
+    let right = bounds.right() - info_edge.max(gutter);
     if workspace.tabs.len() > 1 {
         let strip = Rect::from_min_max(
             egui::pos2(left, top),
-            egui::pos2(bounds.right() - gutter, top + theme::metrics::PANE_HEADER),
+            egui::pos2(right, top + theme::metrics::PANE_HEADER),
         );
         chrome::tabs(ui, strip, workspace, p, actions);
         top = strip.bottom() + 2.0;
     }
     let stage = Rect::from_min_max(
         egui::pos2(left, top),
-        egui::pos2(bounds.right() - gutter, bounds.bottom() - gutter),
+        egui::pos2(right, bounds.bottom() - gutter),
     );
     history_buttons(&ctx, workspace, state, stage, actions);
     if stage.is_positive() {
         content::panes(ui, stage, workspace, config, state, p, actions);
+    }
+    // It slides past the window's trailing edge while a toggle is under way.
+    state.info_subject = None;
+    if info_edge > 0.0 {
+        let panel = Rect::from_min_size(
+            egui::pos2(bounds.right() - info_edge, toolbar.bottom()),
+            Vec2::new(info_width, bounds.bottom() - toolbar.bottom()),
+        );
+        info::panel(
+            ui,
+            panel,
+            bounds,
+            info_reveal,
+            workspace,
+            config,
+            state,
+            p,
+            actions,
+        );
     }
     // The open overlay carries the window controls and toggle with it.
     if overlay > 0.0 {
@@ -485,6 +551,17 @@ fn toggle_sidebar(
     }
 }
 
+/// Shows or hides the info panel; the choice is saved.
+fn toggle_info(config: &mut Config, actions: &mut Vec<Action>) {
+    config.info_panel = !config.info_panel;
+    actions.push(Action::PreferencesChanged);
+}
+
+/// The info panel's keyboard chord as the platform writes it: Terminal's.
+fn info_shortcut() -> String {
+    crate::controls::shortcut("O")
+}
+
 fn take(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
     ctx.input_mut(|i| i.consume_key(modifiers, key))
 }
@@ -553,6 +630,11 @@ fn keyboard(
     // The overlay owns the remaining keys while open; Escape closes it.
     if state.sidebar_overlay {
         return;
+    }
+    // Terminal's right panel chord.
+    if take(ctx, host, Key::O) {
+        toggle_info(config, actions);
+        ctx.request_repaint();
     }
     if let Some(owner) = ctx
         .memory(|m| m.focused())

@@ -82,6 +82,9 @@ pub struct Config {
     pub show_hidden: bool,
     pub sidebar: bool,
     pub sidebar_width: f32,
+    /// The info panel at the window's trailing edge.
+    pub info_panel: bool,
+    pub info_panel_width: f32,
     pub icon_size: f32,
     pub row_height: f32,
     pub window_zoom: f32,
@@ -99,6 +102,8 @@ impl Default for Config {
             show_hidden: false,
             sidebar: true,
             sidebar_width: Self::SIDEBAR_WIDTH,
+            info_panel: false,
+            info_panel_width: Self::INFO_PANEL_WIDTH,
             icon_size: Self::ICON_SIZE,
             row_height: Self::ROW_HEIGHT,
             window_zoom: Self::WINDOW_ZOOM,
@@ -112,6 +117,9 @@ impl Config {
     /// Terminal's sidebar width, so the two windows share one geometry.
     pub const SIDEBAR_WIDTH: f32 = 216.0;
     pub const SIDEBAR_RANGE: (f32, f32) = (170.0, 360.0);
+    /// Terminal's right panel width and range.
+    pub const INFO_PANEL_WIDTH: f32 = 300.0;
+    pub const INFO_PANEL_RANGE: (f32, f32) = (220.0, 560.0);
     pub const ICON_SIZE: f32 = 56.0;
     pub const ICON_RANGE: (f32, f32) = (32.0, 96.0);
     pub const ROW_HEIGHT: f32 = 28.0;
@@ -122,6 +130,8 @@ impl Config {
     pub fn validate(&mut self) {
         let (low, high) = Self::SIDEBAR_RANGE;
         self.sidebar_width = bounded(self.sidebar_width, low, high, Self::SIDEBAR_WIDTH);
+        let (low, high) = Self::INFO_PANEL_RANGE;
+        self.info_panel_width = bounded(self.info_panel_width, low, high, Self::INFO_PANEL_WIDTH);
         let (low, high) = Self::ICON_RANGE;
         self.icon_size = bounded(self.icon_size, low, high, Self::ICON_SIZE);
         let (low, high) = Self::ROW_RANGE;
@@ -165,6 +175,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(toml::from_str::<Config>(&saved).unwrap().window_zoom, 1.3);
+    }
+    #[test]
+    fn the_info_panel_starts_closed_and_keeps_terminals_width_range() {
+        let config: Config = toml::from_str("sidebar = false").unwrap();
+        assert!(!config.info_panel);
+        assert_eq!(config.info_panel_width, Config::INFO_PANEL_WIDTH);
+        for (width, expected) in [(f32::NAN, 300.0), (100.0, 220.0), (900.0, 560.0)] {
+            let mut config = Config {
+                info_panel_width: width,
+                ..Config::default()
+            };
+            config.validate();
+            assert_eq!(config.info_panel_width, expected, "from {width}");
+        }
     }
     #[test]
     fn window_zoom_is_bounded_to_terminals_range() {

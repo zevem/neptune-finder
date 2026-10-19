@@ -1274,7 +1274,7 @@ fn properties(
 }
 
 /// One line of centred text, with a spinner after it while work continues.
-fn centered_line(
+pub(super) fn centered_line(
     ui: &mut Ui,
     p: Palette,
     text: &str,
@@ -1322,7 +1322,14 @@ fn detail(ui: &mut Ui, rows: &mut controls::Group, p: Palette, label: &str, text
 /// A row's value, truncated visibly beside its label. A path keeps its last
 /// folders, as the path bar does. A truncated value shows `whole` in its
 /// tooltip.
-fn value(ui: &mut Ui, p: Palette, label: &str, text: &str, whole: &str, path: bool) -> Response {
+pub(super) fn value(
+    ui: &mut Ui,
+    p: Palette,
+    label: &str,
+    text: &str,
+    whole: &str,
+    path: bool,
+) -> Response {
     let font = theme::regular(13.0);
     let painter = ui.painter();
     let label_width = painter
@@ -1384,7 +1391,7 @@ fn summary(entry: &Entry, loaded: Option<&Properties>) -> String {
 }
 
 /// Why a finished count may not be the whole folder.
-fn count_note(contents: finder_core::Contents) -> Option<&'static str> {
+pub(super) fn count_note(contents: finder_core::Contents) -> Option<&'static str> {
     if contents.limited {
         Some("Counting stopped at 1,000,000 items.")
     } else if contents.partial && contents.complete {
@@ -1394,7 +1401,7 @@ fn count_note(contents: finder_core::Contents) -> Option<&'static str> {
     }
 }
 
-fn file_size(size: u64) -> String {
+pub(super) fn file_size(size: u64) -> String {
     if size < 1000 {
         format!("{size} byte{}", if size == 1 { "" } else { "s" })
     } else {
@@ -1403,7 +1410,7 @@ fn file_size(size: u64) -> String {
 }
 
 /// A count with thousands separators, as "10,970".
-fn grouped(value: u64) -> String {
+pub(super) fn grouped(value: u64) -> String {
     let digits = value.to_string();
     let mut text = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {
@@ -1416,7 +1423,7 @@ fn grouped(value: u64) -> String {
 }
 
 /// A full local date and time, as "Oct 3, 2026 at 00:23:35".
-fn date_time(time: Option<std::time::SystemTime>) -> Option<String> {
+pub(super) fn date_time(time: Option<std::time::SystemTime>) -> Option<String> {
     time.map(|time| {
         chrono::DateTime::<chrono::Local>::from(time)
             .format("%b %-d, %Y at %H:%M:%S")
@@ -1470,7 +1477,7 @@ fn class_words(bits: u32, folder: bool) -> String {
 
 /// Read, write and execute permission as Ubuntu Files names it: what a
 /// person may do in a folder, or with a file.
-fn access_words(read: bool, write: bool, execute: bool, folder: bool) -> String {
+pub(super) fn access_words(read: bool, write: bool, execute: bool, folder: bool) -> String {
     if folder {
         return match (read, write, execute) {
             (true, true, true) => "Create and delete files",

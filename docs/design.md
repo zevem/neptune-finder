@@ -96,8 +96,20 @@ The window is composed as Terminal's is:
   Terminal's command field does, with its Command+F keycaps while empty, and
   trails the title in narrow windows. The trailing cluster holds "New tab",
   list and icon views and split view as toggles that stay pressed while on,
-  and a "More" menu (new items, Go to Folder, hidden files, pinning, refresh,
-  Preferences, About). Views and split move into that menu when room runs out.
+  a "More" menu (new items, Go to Folder, hidden files, pinning, refresh,
+  Preferences, About) and, at the trailing end, the info panel's toggle.
+  Views and split move into that menu when room runs out.
+- **Info panel.** Terminal's right panel at the trailing edge, on the window
+  material below the toolbar: 300 points wide, its leading edge resizing it
+  (220–560, double-click restores 300, saved on release). It slides in or out
+  over 160 ms and takes the files' room only while they keep 360 points; in a
+  narrower window it and its toggle are gone. It describes the active pane's
+  selection: the item's thumbnail (or kind glyph, 64 points) centred on a
+  `bg` tile, its name in 15-point SemiBold over up to three lines, its kind,
+  a centred row of icon buttons for its quick actions, then Details and Dates
+  cards whose values trail 34-point rows. A folder counts its items with a
+  spinner beside the count. With nothing selected it names the folder in view
+  and what it holds; with several items, how many.
 - **Tabs.** A tab strip appears under the toolbar only with more than one tab.
   Tabs share the width equally (120–260 points); the one in view takes the
   `pressed` fill and an accent folder, and each closes from its leading corner
