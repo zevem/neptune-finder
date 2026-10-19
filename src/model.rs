@@ -3,7 +3,62 @@
 use crate::config::Config;
 use finder_core::{Entry, SortOrder};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeSet,
+    ops::Range,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+/// The entries a selection rectangle covers: `rows` × `columns` of a layout
+/// `stride` entries wide. A list is one column wide.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Band {
+    pub rows: Range<usize>,
+    pub columns: Range<usize>,
+    pub stride: usize,
+}
+impl Band {
+    fn contains(&self, index: usize) -> bool {
+        self.stride > 0
+            && self.rows.contains(&(index / self.stride))
+            && self.columns.contains(&(index % self.stride))
+    }
+    /// Covered indices in ascending order, below `len`.
+    fn indices(&self, len: usize) -> impl Iterator<Item = usize> + '_ {
+        let rows = if self.stride > 0 {
+            self.rows.clone()
+        } else {
+            0..0
+        };
+        rows.flat_map(move |row| {
+            self.columns
+                .clone()
+                .map(move |column| row * self.stride + column)
+        })
+        .take_while(move |index| *index < len)
+    }
+}
+
+/// A selection rectangle being dragged: the selection it started from, and
+/// what it covers now.
+struct Marquee {
+    base: BTreeSet<PathBuf>,
+    toggle: bool,
+    band: Band,
+}
+impl Marquee {
+    /// Whether a path is selected while covered (or not): covered paths are
+    /// added, or toggled against the starting selection; others keep it.
+    fn selects(&self, path: &Path, covered: bool) -> bool {
+        let before = self.base.contains(path);
+        if covered {
+            !(self.toggle && before)
+        } else {
+            before
+        }
+    }
+}
 
 pub struct Pane {
     pub id: u64,
@@ -23,6 +78,7 @@ pub struct Pane {
     pub truncated: bool,
     pub focus_index: Option<usize>,
     pub scroll_to: Option<usize>,
+    marquee: Option<Marquee>,
 }
 impl Pane {
     pub fn new(id: u64, path: PathBuf) -> Self {
@@ -44,6 +100,7 @@ impl Pane {
             truncated: false,
             focus_index: None,
             scroll_to: None,
+            marquee: None,
         }
     }
     pub fn navigate(&mut self, path: PathBuf) {
@@ -83,6 +140,7 @@ impl Pane {
         self.focus_index = None;
         self.scroll_to = None;
         self.error = None;
+        self.marquee = None;
     }
     pub fn select(&mut self, index: usize, toggle: bool, range: bool) {
         if index >= self.entries.len() {
@@ -117,6 +175,77 @@ impl Pane {
                     .find(|e| self.selected.contains(&e.path))
             })
             .flatten()
+    }
+    /// Starts a selection rectangle. It replaces the selection, adds to it
+    /// (`extend`), or toggles what it covers (`toggle`).
+    pub fn begin_marquee(&mut self, extend: bool, toggle: bool) {
+        if !extend && !toggle {
+            self.selected.clear();
+        }
+        self.marquee = Some(Marquee {
+            base: self.selected.clone(),
+            toggle,
+            band: Band::default(),
+        });
+    }
+    pub fn marquee_active(&self) -> bool {
+        self.marquee.is_some()
+    }
+    /// Covers `band`, changing only the entries that entered or left it, so
+    /// a sweep across a large folder costs what it changes.
+    pub fn marquee_to(&mut self, band: Band) {
+        let Some(marquee) = self.marquee.as_mut() else {
+            return;
+        };
+        if marquee.band == band {
+            return;
+        }
+        let previous = std::mem::replace(&mut marquee.band, band);
+        let len = self.entries.len();
+        let changed = previous
+            .indices(len)
+            .filter(|&index| !marquee.band.contains(index))
+            .map(|index| (index, false))
+            .chain(
+                marquee
+                    .band
+                    .indices(len)
+                    .filter(|&index| !previous.contains(index))
+                    .map(|index| (index, true)),
+            );
+        for (index, covered) in changed {
+            let path = &self.entries[index].path;
+            if !marquee.selects(path, covered) {
+                self.selected.remove(path);
+            } else if !self.selected.contains(path) {
+                self.selected.insert(path.clone());
+            }
+        }
+    }
+    /// The listing under a selection rectangle changed: it now covers the
+    /// entries in its place.
+    pub fn refresh_marquee(&mut self) {
+        if let Some(marquee) = &self.marquee {
+            self.selected = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(index, entry)| {
+                    marquee.selects(&entry.path, marquee.band.contains(*index))
+                })
+                .map(|(_, entry)| entry.path.clone())
+                .collect();
+        }
+    }
+    /// Ends a selection rectangle; the keyboard continues from the first
+    /// entry it covered.
+    pub fn end_marquee(&mut self) {
+        if let Some(marquee) = self.marquee.take()
+            && let Some(first) = marquee.band.indices(self.entries.len()).next()
+        {
+            self.anchor = Some(first);
+            self.focus_index = Some(first);
+        }
     }
 }
 pub struct Tab {
@@ -264,5 +393,98 @@ mod tests {
         }];
         pane.select(0, false, true);
         assert_eq!(pane.selected.len(), 1);
+    }
+
+    fn entry(path: &str) -> Entry {
+        Entry {
+            path: path.into(),
+            name: path.rsplit('/').next().unwrap_or_default().into(),
+            kind: finder_core::EntryKind::File,
+            size: 0,
+            modified: None,
+            hidden: false,
+        }
+    }
+    fn pane_of(count: usize) -> Pane {
+        let mut pane = Pane::new(1, "/a".into());
+        pane.entries = (0..count).map(|i| entry(&format!("/a/{i}"))).collect();
+        pane
+    }
+    fn selected_rows(pane: &Pane) -> Vec<usize> {
+        (0..pane.entries.len())
+            .filter(|&i| pane.selected.contains(&pane.entries[i].path))
+            .collect()
+    }
+    fn rows(rows: Range<usize>) -> Band {
+        Band {
+            rows,
+            columns: 0..1,
+            stride: 1,
+        }
+    }
+
+    #[test]
+    fn marquee_replaces_extends_or_toggles_its_starting_selection() {
+        let mut pane = pane_of(8);
+        pane.select(0, false, false);
+        pane.begin_marquee(false, false);
+        assert!(pane.selected.is_empty());
+        pane.marquee_to(rows(2..5));
+        assert_eq!(selected_rows(&pane), [2, 3, 4]);
+        // Shrinking releases what the rectangle no longer covers.
+        pane.marquee_to(rows(3..4));
+        assert_eq!(selected_rows(&pane), [3]);
+        pane.end_marquee();
+        assert!(!pane.marquee_active());
+        assert_eq!((pane.anchor, pane.focus_index), (Some(3), Some(3)));
+
+        for (extend, toggle, covering, after) in [
+            (true, false, vec![0, 2, 3, 4], vec![0, 3, 4]),
+            (false, true, vec![0, 2, 4], vec![0, 4]),
+        ] {
+            let mut pane = pane_of(8);
+            pane.select(0, false, false);
+            pane.select(3, true, false);
+            pane.begin_marquee(extend, toggle);
+            pane.marquee_to(rows(2..5));
+            assert_eq!(selected_rows(&pane), covering);
+            // Leaving an entry returns it to the starting selection.
+            pane.marquee_to(rows(3..5));
+            assert_eq!(selected_rows(&pane), after);
+            pane.marquee_to(Band::default());
+            assert_eq!(selected_rows(&pane), [0, 3]);
+        }
+    }
+
+    #[test]
+    fn grid_marquee_covers_rows_by_columns_of_existing_entries() {
+        let mut pane = pane_of(10);
+        pane.begin_marquee(false, false);
+        pane.marquee_to(Band {
+            rows: 1..3,
+            columns: 1..3,
+            stride: 4,
+        });
+        assert_eq!(selected_rows(&pane), [5, 6, 9]);
+        pane.end_marquee();
+        assert_eq!(pane.focus_index, Some(5));
+    }
+
+    #[test]
+    fn marquee_follows_a_refreshed_listing_and_ends_with_navigation() {
+        let mut pane = pane_of(6);
+        pane.select(5, false, false);
+        pane.begin_marquee(true, false);
+        pane.marquee_to(rows(1..3));
+        assert_eq!(selected_rows(&pane), [1, 2, 5]);
+        // A new file sorts first: the rectangle keeps its place on screen.
+        pane.entries.insert(0, entry("/a/new"));
+        pane.refresh_marquee();
+        let expected: BTreeSet<PathBuf> = ["/a/0", "/a/1", "/a/5"].map(PathBuf::from).into();
+        assert_eq!(pane.selected, expected);
+        pane.navigate("/b".into());
+        assert!(!pane.marquee_active());
+        pane.marquee_to(rows(0..2));
+        assert!(pane.selected.is_empty());
     }
 }

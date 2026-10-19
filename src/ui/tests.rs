@@ -108,6 +108,50 @@ impl Harness {
             .next()
             .expect("visible file response")
     }
+
+    /// Bounds of the visible rows or icons, in reading order.
+    fn item_rects(&self) -> Vec<Rect> {
+        let mut rects = self
+            .state
+            .file_widgets
+            .iter()
+            .filter_map(|id| self.ctx.read_response(*id))
+            .map(|response| response.rect)
+            .collect::<Vec<_>>();
+        rects.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .unwrap()
+        });
+        rects
+    }
+
+    /// Presses at `from` and moves far enough to start a drag.
+    fn begin_drag(&mut self, from: egui::Pos2) {
+        self.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
+        self.frame(vec![egui::Event::PointerMoved(from + vec2(0.0, 10.0))]);
+    }
+
+    fn selected_rows(&self) -> Vec<usize> {
+        let pane = self.workspace.pane();
+        (0..pane.entries.len())
+            .filter(|&i| pane.selected.contains(&pane.entries[i].path))
+            .collect()
+    }
+}
+
+fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// Midway between two neighbouring icons.
+fn gap(left: Rect, right: Rect) -> f32 {
+    (left.right() + right.left()) / 2.0
 }
 
 /// Check the actual tessellated UI, including child panels and overlay layers.
@@ -270,6 +314,168 @@ fn hundred_thousand_items_create_only_visible_list_and_grid_widgets() {
         );
         assert_eq!(harness.workspace.pane().entries.len(), 100_000);
     }
+}
+
+#[test]
+fn dragging_beside_names_or_between_icons_selects_what_the_rectangle_covers() {
+    for view in [ViewMode::List, ViewMode::Grid] {
+        let mut harness = Harness::new(40);
+        harness.config.view = view;
+        harness.workspace.pane_mut().select(0, false, false);
+        harness.warm();
+        let items = harness.item_rects();
+        let (from, to, expected) = if view == ViewMode::List {
+            // From the second row's Kind column to the fifth's.
+            (
+                egui::pos2(items[1].right() - 40.0, items[1].center().y),
+                egui::pos2(items[4].right() - 40.0, items[4].center().y),
+                vec![1, 2, 3, 4],
+            )
+        } else {
+            let columns = harness.state.grid_columns[&harness.workspace.pane().id];
+            assert!(columns >= 4);
+            (
+                egui::pos2(gap(items[0], items[1]), items[0].top() + 10.0),
+                egui::pos2(
+                    gap(items[columns + 2], items[columns + 3]),
+                    items[columns + 2].center().y,
+                ),
+                vec![1, 2, columns + 1, columns + 2],
+            )
+        };
+        harness.begin_drag(from);
+        harness.frame(vec![egui::Event::PointerMoved(to)]);
+        assert_eq!(harness.selected_rows(), expected, "{view:?}");
+        assert!(
+            !egui::DragAndDrop::has_any_payload(&harness.ctx),
+            "a selection rectangle picked files up"
+        );
+        let (actions, _) = harness.frame(vec![button(to, false)]);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Submit(..))));
+        assert!(!harness.workspace.pane().marquee_active());
+        assert_eq!(harness.selected_rows(), expected, "{view:?}");
+    }
+}
+
+#[test]
+fn clicks_beside_a_name_select_the_row_and_between_icons_clear_the_selection() {
+    for view in [ViewMode::List, ViewMode::Grid] {
+        let mut harness = Harness::new(40);
+        harness.config.view = view;
+        harness.workspace.pane_mut().select(0, false, false);
+        harness.warm();
+        let items = harness.item_rects();
+        let point = if view == ViewMode::List {
+            egui::pos2(items[3].right() - 40.0, items[3].center().y)
+        } else {
+            egui::pos2(gap(items[0], items[1]), items[0].center().y)
+        };
+        harness.frame(vec![egui::Event::PointerMoved(point), button(point, true)]);
+        harness.frame(vec![button(point, false)]);
+        let expected = if view == ViewMode::List {
+            vec![3]
+        } else {
+            vec![]
+        };
+        assert_eq!(harness.selected_rows(), expected, "{view:?}");
+    }
+}
+
+#[test]
+fn dragging_a_name_still_picks_up_the_files() {
+    let mut harness = Harness::new(40);
+    harness.workspace.pane_mut().select(0, false, false);
+    harness.warm();
+    let items = harness.item_rects();
+    let from = egui::pos2(items[2].left() + 50.0, items[2].center().y);
+    harness.begin_drag(from);
+    harness.frame(vec![egui::Event::PointerMoved(from + vec2(0.0, 80.0))]);
+    assert!(!harness.workspace.pane().marquee_active());
+    assert_eq!(harness.selected_rows(), [2]);
+    assert!(egui::DragAndDrop::has_any_payload(&harness.ctx));
+}
+
+#[test]
+fn a_touch_screen_leaves_drags_to_selection_and_moving_files() {
+    let mut harness = Harness::new(40);
+    let touch = |phase| egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase,
+        pos: egui::pos2(500.0, 400.0),
+        force: None,
+    };
+    harness.frame(vec![touch(egui::TouchPhase::Start)]);
+    harness.frame(vec![touch(egui::TouchPhase::End)]);
+    assert!(harness.ctx.input(|i| i.has_touch_screen()));
+    harness.warm();
+    let items = harness.item_rects();
+    let from = egui::pos2(items[1].right() - 40.0, items[1].center().y);
+    harness.begin_drag(from);
+    let to = egui::pos2(from.x, items[3].center().y);
+    harness.frame(vec![egui::Event::PointerMoved(to)]);
+    assert_eq!(harness.selected_rows(), [1, 2, 3]);
+    harness.frame(vec![button(to, false)]);
+    harness.begin_drag(egui::pos2(items[5].left() + 50.0, items[5].center().y));
+    assert!(egui::DragAndDrop::has_any_payload(&harness.ctx));
+}
+
+#[test]
+fn only_the_primary_button_draws_a_rectangle_or_picks_files_up() {
+    let mut harness = Harness::new(40);
+    harness.workspace.pane_mut().select(0, false, false);
+    harness.warm();
+    let items = harness.item_rects();
+    for button in [egui::PointerButton::Middle, egui::PointerButton::Secondary] {
+        for from in [
+            egui::pos2(items[1].right() - 40.0, items[1].center().y),
+            egui::pos2(items[1].left() + 50.0, items[1].center().y),
+        ] {
+            let to = egui::pos2(from.x, items[3].center().y);
+            harness.frame(vec![
+                egui::Event::PointerMoved(from),
+                pointer_button(from, button, true),
+            ]);
+            harness.frame(vec![egui::Event::PointerMoved(from + vec2(0.0, 10.0))]);
+            harness.frame(vec![egui::Event::PointerMoved(to)]);
+            assert!(!harness.workspace.pane().marquee_active(), "{button:?}");
+            assert!(
+                !egui::DragAndDrop::has_any_payload(&harness.ctx),
+                "{button:?}"
+            );
+            assert_eq!(harness.selected_rows(), [0], "{button:?}");
+            harness.frame(vec![pointer_button(to, button, false)]);
+        }
+    }
+}
+
+#[test]
+fn a_rectangle_past_the_bottom_scrolls_on_and_keeps_covering() {
+    let mut harness = Harness::new(500);
+    harness.warm();
+    let visible = harness.state.file_widgets.len();
+    let items = harness.item_rects();
+    let from = egui::pos2(items[1].right() - 40.0, items[1].center().y);
+    harness.begin_drag(from);
+    let below = egui::pos2(from.x, 790.0);
+    let (_, mut output) = harness.frame(vec![egui::Event::PointerMoved(below)]);
+    for _ in 0..40 {
+        (_, output) = harness.frame(Vec::new());
+    }
+    assert_eq!(
+        output.viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+        std::time::Duration::ZERO,
+        "scrolling stopped while the pointer stayed past the edge"
+    );
+    let covered = harness.selected_rows();
+    assert!(
+        covered.len() > visible + 10,
+        "covered {} rows with {visible} visible",
+        covered.len()
+    );
+    assert_eq!(covered, (1..=covered.len()).collect::<Vec<_>>());
+    harness.frame(vec![button(below, false)]);
+    assert!(!harness.workspace.pane().marquee_active());
 }
 
 #[test]
@@ -686,17 +892,19 @@ fn a_drag_released_in_its_own_folder_or_on_itself_does_nothing() {
             .iter()
             .any(|action| matches!(action, Action::Submit(_)))
     };
+    // Files are picked up by their names; the rest of a row selects.
+    let name = |row: Rect| egui::pos2(row.left() + 50.0, row.center().y);
     // A slow click turns into a drag without moving; releasing it in place
     // used to copy the file onto itself and report a collision.
-    let file = rows[1].center();
+    let file = name(rows[1]);
     assert!(!submitted(&drag(&mut harness, file, file, 1.0)));
     assert!(!submitted(&drag(&mut harness, file, rows[2].center(), 0.0)));
     // A folder is no target for itself.
-    let own = rows[0].center();
+    let own = name(rows[0]);
     let beside = own + vec2(40.0, 0.0);
     assert!(!submitted(&drag(&mut harness, own, beside, 0.0)));
     let source = harness.workspace.pane().entries[1].path.clone();
-    let actions = drag(&mut harness, file, own, 0.0);
+    let actions = drag(&mut harness, file, rows[0].center(), 0.0);
     assert!(
         actions.iter().any(|action| matches!(
             action,
