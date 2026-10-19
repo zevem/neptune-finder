@@ -7,13 +7,13 @@ mod tests;
 use crate::{
     config::{Config, ViewMode, ZoomStep},
     icons::Icon,
-    model::Workspace,
+    model::{Pane, Workspace},
     theme::{self, Palette},
 };
 use eframe::egui::{self, Key, Modifiers, Rect, Stroke, StrokeKind, Vec2};
 use finder_core::SortField;
 use finder_operations::Operation;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub enum Action {
     Navigate(u64, PathBuf),
@@ -66,6 +66,14 @@ pub enum Dialog {
     },
     About,
 }
+/// A location being typed into the toolbar's path bar. It belongs to the pane
+/// and folder in view when editing began, and ends if either changes.
+pub struct LocationEdit {
+    pub pane: u64,
+    pub path: PathBuf,
+    pub text: String,
+    pub focus: bool,
+}
 pub enum Preview {
     Text(String),
     Image(egui::TextureHandle),
@@ -117,6 +125,9 @@ pub struct UiState {
     pub can_paste: bool,
     pub focus_search: bool,
     pub focus_dialog: bool,
+    pub location: Option<LocationEdit>,
+    /// Whether the toolbar had room for its path bar in the last frame.
+    pub path_bar: bool,
     /// The sidebar's width while its trailing edge is dragged.
     pub sidebar_drag: Option<f32>,
     /// The Preferences pane in view while the app runs.
@@ -181,6 +192,8 @@ impl UiState {
             can_paste: false,
             focus_search: false,
             focus_dialog: true,
+            location: None,
+            path_bar: false,
             sidebar_drag: None,
             preferences_pane: dialogs::PreferencesPane::General,
             file_widgets: Default::default(),
@@ -191,6 +204,22 @@ impl UiState {
     pub fn open_dialog(&mut self, dialog: Dialog) {
         self.dialog = Some(dialog);
         self.focus_dialog = true;
+    }
+    /// Type a location for `pane`: in the toolbar's path bar when it has
+    /// room, otherwise in the Go to folder dialog.
+    pub fn go_to_folder(&mut self, pane: &Pane) {
+        if self.path_bar {
+            self.location = Some(LocationEdit {
+                pane: pane.id,
+                path: pane.path.clone(),
+                text: pane.path.display().to_string(),
+                focus: true,
+            });
+        } else {
+            self.open_dialog(Dialog::Location {
+                value: pane.path.display().to_string(),
+            });
+        }
     }
 }
 
@@ -420,14 +449,17 @@ fn keyboard(
             tab.active = index;
         }
     }
+    // egui releases a field's focus on Escape before the frame begins, so
+    // Escape is claimed here: it ends typing a location and goes no further.
+    if state.location.is_some() && take(ctx, Modifiers::NONE, Key::Escape) {
+        state.location = None;
+    }
     let shift = Modifiers {
         shift: true,
         ..command
     };
     if take(ctx, command, Key::L) || take(ctx, shift, Key::G) {
-        state.open_dialog(Dialog::Location {
-            value: workspace.pane().path.display().to_string(),
-        });
+        state.go_to_folder(workspace.pane());
         return;
     }
     if take(ctx, command, Key::F) {
@@ -679,14 +711,35 @@ fn resize_edges(ui: &egui::Ui, bounds: Rect) {
     }
 }
 
-pub fn name(path: &std::path::Path) -> String {
+pub fn name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| path.display().to_string())
 }
+/// The folders from the file system root, or from Home when inside it.
+pub fn breadcrumbs(path: &Path, home: &Path) -> Vec<(String, Icon, PathBuf)> {
+    let mut parts = Vec::new();
+    for ancestor in path.ancestors() {
+        if ancestor == home {
+            parts.push(("Home".to_owned(), Icon::Home, ancestor.to_owned()));
+            break;
+        }
+        if ancestor.parent().is_none() {
+            parts.push((
+                "File system".to_owned(),
+                Icon::Computer,
+                ancestor.to_owned(),
+            ));
+            break;
+        }
+        parts.push((name(ancestor), Icon::Folder, ancestor.to_owned()));
+    }
+    parts.reverse();
+    parts
+}
 /// A path as a person reads it, with the home folder written as `~`.
-pub fn display_path(path: &std::path::Path, home: &std::path::Path) -> String {
+pub fn display_path(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
         Ok(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),

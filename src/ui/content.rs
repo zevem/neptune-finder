@@ -1,7 +1,7 @@
 //! Folder content: each pane is a rounded surface in the window material with
 //! its files, a search scope while searching, and a path bar that says where
 //! it is and what it holds.
-use super::{Action, Dialog, UiState, bytes, name};
+use super::{Action, Dialog, UiState, breadcrumbs, bytes};
 use crate::{
     config::{Accent, ColumnWidths, Config, ViewMode},
     controls::{self, ButtonKind},
@@ -403,28 +403,6 @@ fn path_bar(
                 }
             });
     }
-}
-
-/// The folders from the file system root, or from Home when inside it.
-fn breadcrumbs(path: &Path, home: &Path) -> Vec<(String, Icon, PathBuf)> {
-    let mut parts = Vec::new();
-    for ancestor in path.ancestors() {
-        if ancestor == home {
-            parts.push(("Home".to_owned(), Icon::Home, ancestor.to_owned()));
-            break;
-        }
-        if ancestor.parent().is_none() {
-            parts.push((
-                "File system".to_owned(),
-                Icon::Computer,
-                ancestor.to_owned(),
-            ));
-            break;
-        }
-        parts.push((name(ancestor), Icon::Folder, ancestor.to_owned()));
-    }
-    parts.reverse();
-    parts
 }
 
 fn status_text(pane: &Pane, state: &UiState) -> String {

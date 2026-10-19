@@ -7,13 +7,17 @@ next launch unless restoration is disabled.
 ## Navigation and views
 
 Use the sidebar's familiar places or pinned folders, open a folder in the file
-view, click a folder in the path bar at the bottom of a pane, or choose Go to
-Folder (in the toolbar's More menu) to enter a location. The
-location accepts absolute paths, paths relative to the active pane, `~` and
-`~/…`. Back and Forward use that pane's own history; Up opens its parent. A
-mouse's side Back and Forward buttons travel the pane under the pointer, or the
-active pane elsewhere in the window. Middle-click a folder in the file view,
-sidebar or path bar to open it in a new tab.
+view, or click an enclosing folder in the toolbar's path bar or the path bar at
+the bottom of a pane. When a deep path does not fit, the toolbar's … button lists
+the folders it hides. To type a location, click the toolbar's path bar beside
+its folders, press Go to Folder's shortcut or choose Go to Folder (in the
+toolbar's More menu); Enter opens it and Escape keeps the current folder. A
+window too narrow for the path bar asks in a dialog instead. The location
+accepts absolute paths, paths relative to the active pane, `~` and `~/…`. Back
+and Forward use that pane's own history; Up opens its parent. A mouse's side
+Back and Forward buttons travel the pane under the pointer, or the active pane
+elsewhere in the window. Middle-click a folder in the file view, sidebar or
+either path bar to open it in a new tab.
 
 List view shows sortable file details; drag the dividers between column
 headers to resize them, or double-click one to restore the default widths.
