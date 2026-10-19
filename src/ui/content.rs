@@ -859,7 +859,7 @@ fn row_surface(
 /// always also said in words.
 fn file_icon(entry: &Entry, p: Palette) -> (Icon, Color32) {
     if entry.is_dir() {
-        return (Icon::Folder, p.accent);
+        return (Icon::FolderFilled, p.accent);
     }
     let tint = |accent| theme::accent_color(accent, p.dark);
     match extension(&entry.path).as_str() {

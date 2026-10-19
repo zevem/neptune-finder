@@ -54,7 +54,10 @@ generator, with SVG sources, hashes and the MIT notice.
 Use `icons::paint` and `icons::button`; do not substitute Unicode symbols, emoji,
 hand-drawn paths or another icon set. The full 24-point design cell and its
 optical offsets are preserved. Fractional animated bounds reuse rounded
-physical-pixel rasters. See [icon provenance](../assets/icons/tabler/README.md).
+physical-pixel rasters. Folders listed among files use Tabler's official
+filled folder, so they stand apart from outline file kinds; controls,
+breadcrumbs, tabs and the source list keep outline glyphs. See
+[icon provenance](../assets/icons/tabler/README.md).
 
 ## Geometry and layout
 

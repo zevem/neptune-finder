@@ -112,6 +112,8 @@ pub enum Icon {
     Pin,
     Scissors,
     Info,
+    /// A folder listed among files; actions keep the outline `Folder`.
+    FolderFilled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
