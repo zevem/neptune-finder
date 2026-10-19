@@ -1,0 +1,63 @@
+[workspace]
+members = ["crates/finder-core", "crates/finder-operations"]
+resolver = "3"
+
+[package]
+name = "neptune-finder"
+version = "0.1.0-dev.1"
+edition = "2024"
+rust-version = "1.97.1"
+description = "A quiet, native GPU file explorer for the Neptune ecosystem"
+license = "MIT"
+default-run = "neptune-finder"
+
+[[bin]]
+name = "neptune-finder"
+path = "src/main.rs"
+
+[[bin]]
+name = "neptune-finder-inspect"
+path = "src/bin/neptune-finder-inspect.rs"
+required-features = ["inspection"]
+
+[features]
+inspection = ["eframe/inspection", "dep:egui_inspection"]
+
+[dependencies]
+finder-core = { path = "crates/finder-core" }
+finder-operations = { path = "crates/finder-operations" }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
+egui_inspection = { version = "0.36.2", optional = true }
+anyhow = "1"
+png = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+directories = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+notify = "8.2"
+tempfile = "3.27"
+
+[build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = 0
+incremental = false
+
+[profile.ci.package."*"]
+opt-level = 0

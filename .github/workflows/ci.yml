@@ -1,0 +1,198 @@
+# Adapted from Neptune Terminal: identical pinned actions, toolchain and gate policy.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # New commits replace only runs for the same PR; main pushes stay independent.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # PRs compare the merge commit with its first parent.
+          fetch-depth: 2
+      - name: Classify changes
+        id: changes
+        shell: python
+        env:
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+
+          base = 'HEAD^1'
+          if os.environ['GITHUB_EVENT_NAME'] == 'push':
+              base = os.environ['PUSH_BEFORE_SHA']
+              if base != '0' * 40:
+                  subprocess.run(['git', 'fetch', '--no-tags', '--depth=1', 'origin', base], check=True)
+          code = True
+          if base != '0' * 40:
+              paths = subprocess.check_output(['git', 'diff', '--name-only', '-z', base, 'HEAD']).decode('utf-8').split('\0')
+              code = any(path and not (path.endswith('.md') or path.startswith('artifacts/')) for path in paths)
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write(f'code={str(code).lower()}\n')
+          print('Source/configuration changes: run native matrix' if code else 'Documentation/evidence only: skip compilation')
+
+  validate:
+    name: Fast validation
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        if: needs.preflight.outputs.code == 'true'
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Check formatting
+        if: needs.preflight.outputs.code == 'true'
+        run: cargo fmt --all -- --check
+      - name: Check dependency boundaries and checker regressions
+        run: |
+          python3 scripts/check-architecture.py
+          python3 scripts/check-architecture.py --self-test
+      - name: Verify exact Neptune visual assets
+        run: python3 scripts/verify-design-assets.py
+      - name: Verify native harness isolation and failure cleanup
+        run: python3 -m unittest discover -s scripts -p test_native_harness.py
+
+  native:
+    name: Rust 1.97.1 (${{ matrix.check-name }})
+    needs: preflight
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            check-name: ubuntu-24.04
+          - os: macos-latest
+            check-name: macos-15
+          - os: windows-latest
+            check-name: windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Require successful change classification
+        if: needs.preflight.result != 'success'
+        run: exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check dependency boundaries on this platform
+        run: python3 scripts/check-architecture.py
+      - name: Install Linux build and native capture dependencies
+        if: needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb libgl1-mesa-dri mesa-vulkan-drivers
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        if: needs.preflight.outputs.code == 'true'
+        with:
+          toolchain: 1.97.1
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: needs.preflight.outputs.code == 'true'
+        with:
+          key: ci-${{ matrix.os }}
+          cache-on-failure: true
+      - name: Check lints
+        if: needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        run: cargo clippy --profile ci --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Test ordinary application configuration
+        if: needs.preflight.outputs.code == 'true'
+        run: cargo test --profile ci --workspace --locked
+      - name: Test all features
+        if: needs.preflight.outputs.code == 'true'
+        run: cargo test --profile ci --workspace --all-features --locked
+      - name: Build native application
+        if: needs.preflight.outputs.code == 'true' && runner.os != 'Linux'
+        run: cargo build --profile ci --locked --bin neptune-finder
+      - name: Build native application and inspection client with existing dependencies
+        if: needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        run: cargo build --profile ci --features inspection --locked --bin neptune-finder --bin neptune-finder-inspect
+      - name: Capture isolated native application
+        if: needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        env:
+          WGPU_BACKEND: vulkan
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/neptune-finder-runtime
+        run: |
+          install -d -m 700 "$XDG_RUNTIME_DIR"
+          xvfb-run -a env -u WAYLAND_DISPLAY python3 scripts/native-harness.py --app target/ci/neptune-finder --output artifacts/native-ci
+      - name: Verify native application interaction in isolated fixtures
+        if: needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        env:
+          WGPU_BACKEND: vulkan
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/neptune-finder-runtime
+        run: xvfb-run -a env -u WAYLAND_DISPLAY python3 scripts/inspect-regression.py --app target/ci/neptune-finder --client target/ci/neptune-finder-inspect --output artifacts/native-ci/flow
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && needs.preflight.outputs.code == 'true' && runner.os == 'Linux'
+        with:
+          name: native-linux-1.97.1
+          path: artifacts/native-ci
+          if-no-files-found: ignore
+          retention-days: 7
+
+  latest:
+    name: Latest stable compatibility (Linux)
+    needs: preflight
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require successful change classification
+        if: needs.preflight.result != 'success'
+        run: exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: needs.preflight.outputs.code == 'true'
+      - name: Install Linux build dependencies
+        if: needs.preflight.outputs.code == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        if: needs.preflight.outputs.code == 'true'
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        if: needs.preflight.outputs.code == 'true'
+        with:
+          key: ci-latest
+          cache-on-failure: true
+      - name: Check all targets and features with the latest compiler
+        if: needs.preflight.outputs.code == 'true'
+        run: cargo +stable check --profile ci --workspace --all-targets --all-features --locked
+
+  check:
+    name: Check
+    needs: [preflight, validate, native, latest]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null

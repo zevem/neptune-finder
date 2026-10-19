@@ -1,0 +1,53 @@
+# Third-party notices
+
+Neptune Finder's own code is licensed under the [MIT license](LICENSE). Third-party
+material retains the licenses and attribution below.
+
+## Vendored skills
+
+The development skills live in `.agents/skills/`; `.claude/skills/` links to the
+same files. [skills-lock.json](skills-lock.json) records their direct sources.
+The license files below are verbatim copies from the linked upstream revisions;
+those revisions identify the license sources, not the installed skill versions.
+
+| Material | Upstream license source | Local license notice |
+| --- | --- | --- |
+| `.agents/skills/better-ui/` | [Jakub Krehel's skills](https://github.com/jakubkrehel/skills/blob/267330e1adfc66a718fb65fa6918c1f06d0a689e/LICENSE) | [MIT](licenses/skills/jakubkrehel-skills-MIT.txt) |
+| `.agents/skills/emil-design-eng/` | [Emil Kowalski's skills](https://github.com/emilkowalski/skills/blob/d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128/LICENSE) | [MIT](licenses/skills/emilkowalski-skills-MIT.txt) |
+| `.agents/skills/rust-best-practices/` skill guide and adaptations | [Apollo GraphQL's skills](https://github.com/apollographql/skills/blob/222dfc07720227bd0f330bd1b45a9741b1c97bee/LICENSE) | [MIT](licenses/skills/apollographql-skills-MIT.txt) |
+| All other skill directories listed in `skills-lock.json` | [Matt Pocock's skills](https://github.com/mattpocock/skills/blob/d81f3a183412e71a5b1e84ca21bc1a35eea03a60/LICENSE) | [MIT](licenses/skills/mattpocock-skills-MIT.txt) |
+| Visual examples and placement guidance adapted in `.agents/skills/pr/SKILL.md` | [HumanLayer's skills](https://github.com/humanlayer/skills/blob/ca7c8088db69e315a8b2deea43820270457f8f3c/LICENSE) | [MIT](licenses/skills/humanlayer-skills-MIT.txt) |
+| Handbook material in `.agents/skills/rust-best-practices/references/chapter_01.md` through `chapter_09.md` | [Apollo GraphQL's Rust Best Practices Handbook](https://github.com/apollographql/rust-best-practices/blob/eb485a5ddb68e0ded3d79549e994f63ec0a6f6c0/LICENSE) | [Apache-2.0](licenses/skills/apollographql-rust-best-practices-Apache-2.0.txt) |
+
+The `pr` skill adapts Dex Horthy and HumanLayer's
+[`show-me`](https://github.com/humanlayer/skills/blob/ca7c8088db69e315a8b2deea43820270457f8f3c/plugins/show-me/skills/show-me/SKILL.md)
+material for pull request diffs. Its [credits](.agents/skills/pr/CREDITS.md)
+identify that adaptation. The Rust reference chapters adapt Apache-2.0 handbook
+material for skill use and include local edits; each chapter carries a source
+and modification notice. Apollo's skill adaptations retain their MIT notice.
+
+Copies of these skills or excerpts must retain the applicable license texts,
+copyright notices and attribution, including those for adapted material.
+
+## Tabler icons
+
+Desktop controls use
+[Tabler Icons 3.49.0](https://github.com/tabler/tabler-icons), copyright Paweł
+Kuna, under the [MIT license](assets/icons/tabler/LICENSE.txt). The pinned
+[asset manifest and regeneration notes](assets/icons/tabler/README.md) retain
+source URLs, hashes and mappings. Future release archives must include the MIT
+notice.
+
+The GitHub glyph identifies that service; its brand remains a trademark of its
+owner. Neptune Finder uses its user-provided artwork rather than Tabler or Terminal
+branding. Native icon derivatives preserve that artwork; see
+[provenance](docs/provenance.md).
+
+## Bundled fonts and dependencies
+
+Geist and JetBrains Mono retain their SIL Open Font License 1.1 notices in
+[`assets/fonts/`](assets/fonts/README.md).
+
+Cargo dependencies retain their respective licenses. Future release packaging must
+collect their license files and notices into binary archives. The development
+skills above are distributed with the source repository.

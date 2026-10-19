@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Neptune Finder
+Comment=Native GPU file explorer
+Exec=neptune-finder %f
+TryExec=neptune-finder
+Icon=rs.neptune.finder
+Terminal=false
+Categories=System;FileManager;FileTools;
+MimeType=inode/directory;
+StartupWMClass=rs.neptune.finder
+Keywords=files;folders;explorer;finder;neptune;

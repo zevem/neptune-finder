@@ -1,0 +1,11 @@
+[package]
+name = "finder-operations"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Bounded, recoverable filesystem operations for Neptune Finder"
+license = "MIT"
+
+[dependencies]
+tempfile = "3.27"
+trash = "5.2.3"

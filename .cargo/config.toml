@@ -1,0 +1,3 @@
+[build]
+# Multiple agents compile in separate worktrees on the same development machine.
+jobs = 2
