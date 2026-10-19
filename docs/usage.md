@@ -23,10 +23,11 @@ List view shows sortable file details; drag the dividers between column
 headers to resize them, or double-click one to restore the default widths.
 Icon view uses the same entries and selection with adjustable icon size.
 Folders appear first; hidden files are configurable. Each pane's path bar
-shows where it is and how many items it holds or has selected. The sidebar
-yields space in narrow windows; toggle it from the toolbar or with
-Command+Shift+B (⌘B on macOS), and drag its trailing
-edge to resize it. A loading state
+shows where it is and how many items it holds or has selected. Toggle the
+sidebar from the toolbar or with Command+Shift+B (⌘B on macOS), and drag its
+trailing edge to resize it. In narrow windows it yields its space to files;
+the same button or shortcut then opens it over the files, and it closes again
+once you choose a place, click outside it or press Escape. A loading state
 appears while a worker reads a directory, and unavailable locations show errors
 without freezing navigation.
 

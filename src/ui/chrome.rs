@@ -71,37 +71,122 @@ fn toggle_button(ui: &mut Ui, icon: Icon, label: &str, hint: &str, on: bool, p: 
     response.clicked()
 }
 
-/// The window controls and the sidebar toggle. They are drawn over the
-/// sidebar and toolbar, so the toggle can travel between them as it slides.
-#[allow(clippy::too_many_arguments)]
+/// The window controls and the sidebar toggle, centred `toggle` from the
+/// window's leading edge. They are drawn over the sidebar and toolbar, so the
+/// toggle can travel between them as it slides. Returns whether the toggle
+/// was clicked.
 pub fn leading_controls(
     ui: &mut Ui,
     bounds: Rect,
     p: Palette,
-    config: &mut Config,
-    available: bool,
-    reveal: f32,
-    width: f32,
+    toggle: f32,
     actions: &mut Vec<Action>,
-) {
+) -> bool {
     let middle = bounds.top() + metrics::TOOLBAR_HEIGHT * 0.5;
     window_controls(ui, pos2(bounds.left() + 16.0, middle), p, actions);
-    if available
-        && icon_at(
-            ui,
-            pos2(
-                bounds.left() + egui::lerp(TOGGLE_HIDDEN..=width - 22.0, reveal).round(),
-                middle,
-            ),
-            Icon::Sidebar,
-            "Toggle sidebar",
-            &controls::shortcut("B"),
-            true,
-        )
-        .clicked()
+    icon_at(
+        ui,
+        pos2(bounds.left() + toggle.round(), middle),
+        Icon::Sidebar,
+        "Toggle sidebar",
+        &controls::shortcut("B"),
+        true,
+    )
+    .clicked()
+}
+
+/// The sidebar opened over the files of a window too narrow to keep it
+/// beside them. It slides in from the leading edge over a scrim and closes
+/// once a place is chosen, outside it is clicked, or on Escape.
+#[allow(clippy::too_many_arguments)]
+pub fn sidebar_overlay(
+    ui: &mut Ui,
+    bounds: Rect,
+    width: f32,
+    reveal: f32,
+    workspace: &Workspace,
+    config: &mut Config,
+    state: &mut UiState,
+    p: Palette,
+    actions: &mut Vec<Action>,
+) {
+    let ctx = ui.ctx().clone();
+    // Some files stay in view beside it, to click away on.
+    let width = width.min(bounds.width() - 56.0).round();
+    let rect = Rect::from_min_size(
+        pos2(
+            bounds.left() + (width * reveal).round() - width,
+            bounds.top(),
+        ),
+        vec2(width, bounds.height()),
+    );
+    let radius = super::window_radius(&ctx);
+    let scrim = egui::LayerId::new(egui::Order::Middle, egui::Id::new("finder-sidebar-scrim"));
+    controls::scrim(&ctx.layer_painter(scrim), bounds, radius, p, reveal);
+    let id = controls::viewport_id(&ctx, egui::Id::new("finder-sidebar-overlay"));
+    let area = egui::Area::new(id)
+        .kind(egui::UiKind::Modal)
+        .sense(Sense::hover())
+        .order(egui::Order::Foreground)
+        .interactable(true)
+        .fixed_pos(rect.min)
+        .constrain(false)
+        .fade_in(false);
+    let first = actions.len();
+    let modal = egui::Modal::new(id)
+        .area(area)
+        .frame(egui::Frame::NONE)
+        .backdrop_color(Color32::TRANSPARENT)
+        .show(&ctx, |ui| {
+            ui.set_min_size(rect.size());
+            // The same material as the docked sidebar, lifted by a shadow
+            // that falls only over the files. While it slides, its own
+            // leading corners are outside the window, so it takes the
+            // window's rounded shape, cut at its trailing edge, and neither
+            // shadow nor edge reaches into the window's leading corners.
+            let painter = ui.painter();
+            let corner = radius as f32;
+            painter
+                .with_clip_rect(Rect::from_min_max(
+                    pos2(rect.right().max(bounds.left() + corner), bounds.top()),
+                    bounds.max,
+                ))
+                .add(p.sheet_shadow().as_shape(rect, 0));
+            painter
+                .with_clip_rect(Rect::from_min_max(
+                    bounds.min,
+                    pos2(rect.right(), bounds.bottom()),
+                ))
+                .rect_filled(bounds, radius, p.chrome);
+            let inset = if rect.right() - bounds.left() < corner {
+                corner
+            } else {
+                0.0
+            };
+            painter.vline(
+                rect.right() - 0.5,
+                (bounds.top() + inset)..=(bounds.bottom() - inset),
+                Stroke::new(1.0, p.border),
+            );
+            sidebar(ui, rect, workspace, config, state, p, false, actions);
+            leading_controls(
+                ui,
+                bounds,
+                p,
+                egui::lerp(TOGGLE_HIDDEN..=width - 22.0, reveal),
+                actions,
+            )
+        });
+    modal
+        .response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Window, true, "Sidebar"));
+    let chosen = actions[first..]
+        .iter()
+        .any(|action| matches!(action, Action::Navigate(..) | Action::NewTab(_)));
+    if state.sidebar_overlay
+        && (modal.inner || chosen || state.dialog.is_some() || modal.should_close())
     {
-        config.sidebar = !config.sidebar;
-        actions.push(Action::PreferencesChanged);
+        state.sidebar_overlay = false;
     }
 }
 

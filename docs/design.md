@@ -87,6 +87,10 @@ The window is composed as Terminal's is:
   Preferences. The trailing edge resizes it (170–360 points, double-click
   restores 216, saved on release). It slides in or out over 160 ms and yields
   to files below 820 points of window width; the toggle travels with it.
+  There the toggle and its shortcut open it over the files instead: it slides
+  from the leading edge over a scrim, carrying the window controls and toggle,
+  and closes when a place is chosen, outside it is clicked or Escape is
+  pressed. Opening it there leaves the saved sidebar preference alone.
 - **Toolbar.** 44 points, dragging the window. Back and Forward lead, then the
   folder's name in the medium weight. The search field stays centred, as
   Terminal's command field does, with its Command+F keycaps while empty, and
