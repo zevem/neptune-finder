@@ -980,7 +980,12 @@ mod tests {
         let (_fixture, root) = fixture();
         assert!(checked_item(root.ancestors().last().unwrap()).is_err());
         assert!(checked_open_item(root.ancestors().last().unwrap()).is_ok());
-        assert!(checked_directory(&root.join("..")).is_err());
+        // `Path::join` resolves `..` on Windows verbatim (`\\?\`) roots, so
+        // append it textually to keep the ambiguous component.
+        let mut ambiguous = root.clone().into_os_string();
+        ambiguous.push(std::path::MAIN_SEPARATOR_STR);
+        ambiguous.push("..");
+        assert!(checked_directory(Path::new(&ambiguous)).is_err());
         assert!(
             execute(Operation::Copy {
                 sources: vec![],

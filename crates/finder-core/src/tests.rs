@@ -425,7 +425,8 @@ fn recursive_search_never_follows_directory_symlinks_or_cycles() {
     );
 }
 
-#[cfg(unix)]
+// APFS rejects non-UTF-8 names with EILSEQ, so macOS cannot create the fixture.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_display_names_do_not_destroy_native_paths() {
     use std::ffi::OsString;
