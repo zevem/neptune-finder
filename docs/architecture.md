@@ -66,10 +66,16 @@ falling back to permanent deletion.
 
 Search reads, desktop-owned previews (`src/preview.rs`) and Properties folder
 counts are bounded and superseded by newer requests; closing Properties
-cancels its count, which also stays on the folder's own volume. Icon-view
+cancels its count, which also stays on the folder's own volume. The info
+panel reads the selected item's properties on its own worker of the same
+kind, so it and the Properties sheet never supersede each other; a new
+selection supersedes its read and hiding the panel cancels it. Icon-view
 thumbnails (`src/thumbnails.rs`) follow the same rule: frames name the files
 on screen, each request replaces the worker queue, decoding is bounded per
 worker, and uploaded pictures off screen are trimmed to a memory budget. The
+info panel's one larger picture leads the same request, also reads the
+image's dimensions from its header, and is released as soon as the panel
+shows another item or closes. The
 freedesktop.org thumbnail cache is read, validated against each file's URI
 and modification time, and never written. Symbolic links must not
 turn a recursive walk into a cycle, and a slow mount must not block a UI frame.

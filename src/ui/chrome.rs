@@ -626,6 +626,20 @@ pub fn toolbar(
         "toolbar-actions",
         |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            // Over the panel it shows, as Terminal's right panel toggle is;
+            // a window without room for the panel has none.
+            if state.info_available
+                && toggle_button(
+                    ui,
+                    Icon::PanelRight,
+                    "Toggle info panel",
+                    &super::info_shortcut(),
+                    config.info_panel,
+                    p,
+                )
+            {
+                super::toggle_info(config, actions);
+            }
             let menu = icons::button(ui, Icon::Ellipsis, "More actions");
             more_menu(&menu, workspace, config, state, p, roomy, actions);
             if roomy {

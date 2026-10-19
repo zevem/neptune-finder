@@ -25,6 +25,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
+    time::SystemTime,
 };
 
 const PATH_BAR: f32 = 30.0;
@@ -1350,7 +1351,7 @@ fn drag_preview(ui: &egui::Ui, state: &UiState, p: Palette) {
 /// The file's picture centred in the icon's square, never enlarged past its
 /// own pixels. Opaque pictures get a hairline edge so a light picture keeps
 /// its shape on a light pane.
-fn paint_thumbnail(
+pub(super) fn paint_thumbnail(
     painter: &egui::Painter,
     entry: &Entry,
     thumbnail: &Texture,
@@ -1508,22 +1509,24 @@ fn cell_text(ui: &egui::Ui, text: &str, left: f32, middle: f32, width: f32, colo
     controls::galley_at(ui.painter(), pos2(left, middle), text);
 }
 
-/// "Today at 14:02", "Yesterday at 09:13", or the full date.
 fn modified(entry: &Entry, today: chrono::NaiveDate) -> String {
-    entry
-        .modified
-        .map(|time| {
-            let date: chrono::DateTime<chrono::Local> = time.into();
-            let day = date.date_naive();
-            if day == today {
-                date.format("Today at %H:%M").to_string()
-            } else if today.pred_opt() == Some(day) {
-                date.format("Yesterday at %H:%M").to_string()
-            } else {
-                date.format("%b %-d, %Y at %H:%M").to_string()
-            }
-        })
-        .unwrap_or_else(|| "—".into())
+    relative_date(entry.modified, today)
+}
+
+/// "Today at 14:02", "Yesterday at 09:13", or the full date.
+pub(super) fn relative_date(time: Option<SystemTime>, today: chrono::NaiveDate) -> String {
+    time.map(|time| {
+        let date: chrono::DateTime<chrono::Local> = time.into();
+        let day = date.date_naive();
+        if day == today {
+            date.format("Today at %H:%M").to_string()
+        } else if today.pred_opt() == Some(day) {
+            date.format("Yesterday at %H:%M").to_string()
+        } else {
+            date.format("%b %-d, %Y at %H:%M").to_string()
+        }
+    })
+    .unwrap_or_else(|| "—".into())
 }
 
 fn interact(
@@ -1727,7 +1730,7 @@ fn interact(
 }
 
 /// The suggested archive name: the item's own name, or “Archive” for several.
-fn archive_name(sources: &[PathBuf]) -> String {
+pub(super) fn archive_name(sources: &[PathBuf]) -> String {
     match sources {
         [source] => format!("{}.zip", name(source)),
         _ => "Archive.zip".into(),

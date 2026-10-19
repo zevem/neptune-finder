@@ -5,10 +5,16 @@
 //! Files, Dolphin, Blender and others, is used first: that is how videos,
 //! documents and formats this build cannot decode get pictures. Otherwise
 //! images this build decodes are reduced in process. Nothing is written back.
+//!
+//! The info panel asks the same workers for one larger picture at a time,
+//! with the image's own dimensions read from its header.
 
 use eframe::egui;
 use finder_core::{Entry, EntryKind};
-use image::{DynamicImage, ImageBuffer, ImageDecoder, ImageFormat, ImageReader, Limits};
+use image::{
+    DynamicImage, ImageBuffer, ImageDecoder, ImageFormat, ImageReader, Limits,
+    metadata::Orientation,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::BufReader;
@@ -49,6 +55,8 @@ pub struct Key {
     pub modified: Option<SystemTime>,
     pub size: u64,
     pub pixels: u32,
+    /// The info panel's request, which also reports the image's dimensions.
+    pub measure: bool,
 }
 impl Key {
     pub fn new(entry: &Entry, pixels: u32) -> Self {
@@ -57,6 +65,15 @@ impl Key {
             modified: entry.modified,
             size: entry.size,
             pixels,
+            measure: false,
+        }
+    }
+
+    /// The info panel's picture of `entry`, with its dimensions.
+    pub fn measured(entry: &Entry, pixels: u32) -> Self {
+        Self {
+            measure: true,
+            ..Self::new(entry, pixels)
         }
     }
 }
@@ -70,6 +87,9 @@ pub struct Thumbnail {
     pub key: Key,
     /// `None` when the file has no thumbnail; it keeps its icon.
     pub picture: Option<Picture>,
+    /// The image's own width and height as shown, when the key measures and
+    /// this build reads the format.
+    pub dimensions: Option<[u32; 2]>,
 }
 
 #[derive(Default)]
@@ -187,6 +207,7 @@ fn run(shared: Arc<Shared>) {
             }
         };
         let picture = render(&key, shared.cache.as_deref());
+        let dimensions = key.measure.then(|| dimensions(&key.path)).flatten();
         let mut queue = lock(&shared);
         queue.running.remove(&key);
         if queue.closed {
@@ -194,7 +215,11 @@ fn run(shared: Arc<Shared>) {
         }
         // One wake covers every result the window has not collected yet.
         let wake = queue.done.is_empty();
-        queue.done.push(Thumbnail { key, picture });
+        queue.done.push(Thumbnail {
+            key,
+            picture,
+            dimensions,
+        });
         drop(queue);
         if wake {
             (shared.wake)();
@@ -270,6 +295,42 @@ fn decode(path: &Path, metadata: &fs::Metadata, pixels: u32) -> Option<DynamicIm
         image.apply_orientation(orientation);
     }
     Some(image)
+}
+
+/// An image's width and height as it is shown, from its header alone: a
+/// photo its camera turned on its side reads upright.
+fn dimensions(path: &Path) -> Option<[u32; 2]> {
+    if !decodable(path) {
+        return None;
+    }
+    fs::metadata(path).ok().filter(fs::Metadata::is_file)?;
+    let reader = ImageReader::new(BufReader::new(File::open(path).ok()?))
+        .with_guessed_format()
+        .ok()?;
+    if !matches!(
+        reader.format()?,
+        ImageFormat::Png
+            | ImageFormat::Jpeg
+            | ImageFormat::Gif
+            | ImageFormat::WebP
+            | ImageFormat::Bmp
+    ) {
+        return None;
+    }
+    let mut decoder = reader.into_decoder().ok()?;
+    let (width, height) = decoder.dimensions();
+    let turned = matches!(
+        decoder.orientation(),
+        Ok(Orientation::Rotate90
+            | Orientation::Rotate270
+            | Orientation::Rotate90FlipH
+            | Orientation::Rotate270FlipH)
+    );
+    Some(if turned {
+        [height, width]
+    } else {
+        [width, height]
+    })
 }
 
 /// Shrinks to fit a square of `pixels`, never enlarging. Area averaging is
@@ -495,6 +556,77 @@ impl Cache {
     }
 }
 
+/// The info panel's picture: one file's at a time, with the image's
+/// dimensions. Another file's picture is released at once, and a result for
+/// a file no longer shown is never uploaded.
+#[derive(Default)]
+pub struct Single {
+    shown: Option<Shown>,
+    wanted: Option<Key>,
+    drawn: bool,
+}
+
+pub struct Shown {
+    key: Key,
+    pub texture: Option<Texture>,
+    pub dimensions: Option<[u32; 2]>,
+}
+
+impl Single {
+    /// What to show for `entry` at `pixels`. A changed file or size asks for
+    /// a new picture; the previous one of the same file shows until it
+    /// arrives.
+    pub fn get(&mut self, entry: &Entry, pixels: u32) -> Option<&Shown> {
+        self.drawn = true;
+        if !matches!(entry.kind, EntryKind::File | EntryKind::Symlink) {
+            self.shown = None;
+            self.wanted = None;
+            return None;
+        }
+        let key = Key::measured(entry, pixels);
+        match &self.shown {
+            Some(shown) if shown.key == key => self.wanted = None,
+            Some(shown) if shown.key.path == key.path => self.wanted = Some(key),
+            _ => {
+                self.shown = None;
+                self.wanted = Some(key);
+            }
+        }
+        self.shown.as_ref()
+    }
+
+    /// Uploads the picture still wanted; anything else is dropped.
+    pub fn insert(&mut self, ctx: &egui::Context, thumbnail: Thumbnail) {
+        if self.wanted.as_ref() != Some(&thumbnail.key) {
+            return;
+        }
+        self.wanted = None;
+        self.shown = Some(Shown {
+            key: thumbnail.key,
+            texture: thumbnail.picture.map(|picture| Texture {
+                // Texture names reach debugging tools, so never a file name.
+                handle: ctx.load_texture(
+                    "info-picture",
+                    picture.image,
+                    egui::TextureOptions::LINEAR,
+                ),
+                opaque: picture.opaque,
+            }),
+            dimensions: thumbnail.dimensions,
+        });
+    }
+
+    /// Ends a frame: returns the picture still needed. A panel that was not
+    /// drawn releases its picture.
+    pub fn end_frame(&mut self) -> Option<Key> {
+        if !std::mem::take(&mut self.drawn) {
+            self.shown = None;
+            self.wanted = None;
+        }
+        self.wanted.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +666,7 @@ mod tests {
                 modified: None,
                 size: 0,
                 pixels,
+                measure: false,
             }
         }
     }
@@ -750,6 +883,7 @@ mod tests {
             Thumbnail {
                 key: Key::new(&photo, 64),
                 picture: picture(4, 2),
+                dimensions: None,
             },
         );
         assert!(cache.get(&photo, 64).is_some());
@@ -781,6 +915,7 @@ mod tests {
                     Thumbnail {
                         key: Key::new(&entry(path, EntryKind::File), 64),
                         picture: None,
+                        dimensions: None,
                     },
                 );
             }
@@ -796,5 +931,90 @@ mod tests {
         assert!(cache.slots.len() <= CACHE_SLOTS / 4 * 3);
         assert!(cache.slots.contains_key(&older[0]));
         assert!(newer.iter().all(|path| cache.slots.contains_key(path)));
+    }
+
+    #[test]
+    fn measured_requests_report_dimensions_read_from_the_header() {
+        let fixture = Fixture::new();
+        let wide = fixture.image("wide.png", 300, 120, 255);
+        assert_eq!(dimensions(&wide), Some([300, 120]));
+        let text = fixture.0.join("notes.txt");
+        fs::write(&text, "Neptune").unwrap();
+        let broken = fixture.0.join("broken.png");
+        fs::write(&broken, b"\x89PNG\r\n\x1a\nnot really").unwrap();
+        for path in [
+            text,
+            broken,
+            fixture.0.join("missing.png"),
+            fixture.0.clone(),
+        ] {
+            assert_eq!(dimensions(&path), None);
+        }
+
+        let workers = Thumbnails::with_cache(None, || {});
+        let photo = entry(&wide, EntryKind::File);
+        workers.request(&[Key::measured(&photo, 256), Key::new(&photo, 64)]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut results = Vec::new();
+        while results.len() < 2 {
+            assert!(Instant::now() < deadline, "thumbnails did not arrive");
+            results.extend(workers.poll());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for result in results {
+            let expected = result.key.measure.then_some([300, 120]);
+            assert_eq!(
+                result.dimensions, expected,
+                "measure: {}",
+                result.key.measure
+            );
+        }
+    }
+
+    #[test]
+    fn the_panel_keeps_one_files_picture_and_drops_late_ones() {
+        let ctx = egui::Context::default();
+        let mut single = Single::default();
+        let first = entry(Path::new("/pictures/first.png"), EntryKind::File);
+        let second = entry(Path::new("/pictures/second.png"), EntryKind::File);
+        let arrive = |single: &mut Single, entry: &Entry, pixels| {
+            single.insert(
+                &ctx,
+                Thumbnail {
+                    key: Key::measured(entry, pixels),
+                    picture: picture(4, 2),
+                    dimensions: Some([4, 2]),
+                },
+            );
+        };
+        assert!(single.get(&first, 256).is_none());
+        assert_eq!(single.end_frame(), Some(Key::measured(&first, 256)));
+        arrive(&mut single, &first, 256);
+        let shown = single.get(&first, 256).expect("first picture");
+        assert!(shown.texture.is_some());
+        assert_eq!(shown.dimensions, Some([4, 2]));
+        assert_eq!(single.end_frame(), None);
+
+        // A larger panel keeps the picture until the sharper one arrives.
+        assert!(single.get(&first, 512).is_some());
+        assert_eq!(single.end_frame(), Some(Key::measured(&first, 512)));
+
+        // Another file never shows the first file's picture, and the first
+        // file's late result is not uploaded.
+        assert!(single.get(&second, 512).is_none());
+        arrive(&mut single, &first, 512);
+        assert!(single.get(&second, 512).is_none());
+        assert_eq!(single.end_frame(), Some(Key::measured(&second, 512)));
+
+        // Folders have no picture, and a panel no longer drawn lets go.
+        let folder = entry(Path::new("/pictures/album"), EntryKind::Directory);
+        assert!(single.get(&folder, 512).is_none());
+        assert_eq!(single.end_frame(), None);
+        assert!(single.get(&second, 512).is_none());
+        arrive(&mut single, &second, 512);
+        assert!(single.end_frame().is_none());
+        assert!(single.shown.is_some());
+        single.end_frame();
+        assert!(single.shown.is_none());
     }
 }
