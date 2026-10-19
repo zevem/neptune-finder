@@ -923,8 +923,12 @@ fn location_field(
             edit.text.clear();
         }
         edit.focus = true;
-    } else if !response.has_focus() && !edit.focus && !ui.input(|input| input.pointer.any_down()) {
-        // Escape or a click elsewhere.
+    } else if !ui.memory(|memory| memory.has_focus(response.id))
+        && !edit.focus
+        && !ui.input(|input| input.pointer.any_down())
+    {
+        // Escape or a click elsewhere. Widget focus, not `Response::has_focus`,
+        // which is also false while another window is in front.
         state.location = None;
     }
 }

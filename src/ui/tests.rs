@@ -14,6 +14,8 @@ struct Harness {
     state: UiState,
     time: f64,
     viewport: egui::ViewportInfo,
+    /// Whether the window has the operating system's keyboard focus.
+    window_focused: bool,
 }
 
 impl Harness {
@@ -52,6 +54,7 @@ impl Harness {
             state: UiState::new(path),
             time: 0.0,
             viewport: egui::ViewportInfo::default(),
+            window_focused: true,
         }
     }
 
@@ -70,7 +73,7 @@ impl Harness {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
             time: Some(self.time),
             events,
-            focused: true,
+            focused: self.window_focused,
             ..egui::RawInput::default()
         };
         input
@@ -672,6 +675,27 @@ fn path_bar_edits_a_location_that_enter_opens_and_escape_cancels() {
         );
         assert_eq!(harness.workspace.pane().selected, selected);
     }
+}
+
+#[test]
+fn location_edit_survives_another_window_taking_focus() {
+    let mut harness = Harness::new(3);
+    harness.warm();
+    harness.frame(vec![key(Key::L, true, false, Modifiers::COMMAND)]);
+    harness.frame(vec![key(Key::L, false, false, Modifiers::COMMAND)]);
+    assert!(harness.state.location.is_some());
+    harness.window_focused = false;
+    for _ in 0..3 {
+        harness.frame(Vec::new());
+    }
+    assert!(
+        harness.state.location.is_some(),
+        "an inactive window ended the location edit"
+    );
+    harness.window_focused = true;
+    harness.frame(vec![egui::Event::Text("~/Downloads".into())]);
+    let (actions, _) = harness.frame(vec![press(Key::Enter)]);
+    assert_eq!(location_actions(&actions), ["~/Downloads"]);
 }
 
 #[test]
