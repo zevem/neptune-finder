@@ -1193,11 +1193,162 @@ fn a_drag_released_in_its_own_folder_or_on_itself_does_nothing() {
     assert!(
         actions.iter().any(|action| matches!(
             action,
+            Action::Submit(Operation::Move { sources, destination })
+                if sources == std::slice::from_ref(&source) && destination == &folder
+        )),
+        "a file dropped on a folder was not moved into it"
+    );
+    // The platform's copy modifier copies instead.
+    harness.frame(vec![egui::Event::ModifiersChanged(copy_modifier())]);
+    let actions = drag(&mut harness, file, rows[0].center(), 0.0);
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
             Action::Submit(Operation::Copy { sources, destination })
                 if sources == std::slice::from_ref(&source) && destination == &folder
         )),
-        "a file dropped on a folder was not copied into it"
+        "a file dropped with the copy modifier was not copied"
     );
+}
+
+/// Ctrl, or Option on macOS, makes a drop copy.
+fn copy_modifier() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    }
+}
+
+#[test]
+fn dragged_files_follow_the_pointer_with_their_count() {
+    let mut harness = Harness::new(4);
+    harness.workspace.pane_mut().select(1, false, false);
+    harness.workspace.pane_mut().select(2, true, false);
+    harness.warm();
+    let rows = harness.item_rects();
+    let from = egui::pos2(rows[1].left() + 50.0, rows[1].center().y);
+    let to = egui::pos2(rows[3].left() + 200.0, rows[3].bottom() + 40.0);
+    let card =
+        |pointer: egui::Pos2| Rect::from_min_size(pointer + vec2(12.0, 14.0), Vec2::splat(56.0));
+    let painted = |output: &egui::FullOutput, rect: Rect| {
+        output
+            .shapes
+            .iter()
+            .any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == rect))
+    };
+    let count = |output: &egui::FullOutput| {
+        output.shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.job.text == "2")
+        })
+    };
+    harness.begin_drag(from);
+    let (_, output) = harness.frame(vec![egui::Event::PointerMoved(to)]);
+    assert!(painted(&output, card(to)), "no picture under the pointer");
+    assert!(
+        count(&output),
+        "the picture does not say how many items move"
+    );
+    harness.frame(vec![button(to, false)]);
+    let (_, output) = harness.frame(Vec::new());
+    assert!(
+        !painted(&output, card(to)) && !count(&output),
+        "the picture stayed after the drop"
+    );
+}
+
+#[test]
+fn the_native_clipboard_chords_copy_cut_and_paste_files() {
+    let mut harness = Harness::new(5);
+    harness.workspace.pane_mut().select(1, false, false);
+    harness.workspace.pane_mut().select(2, true, false);
+    harness.warm();
+    let selected = harness
+        .workspace
+        .pane()
+        .selected
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let folder = harness.workspace.pane().path.clone();
+    let copied = |actions: &[Action], cut: bool| {
+        actions.iter().any(|action| {
+            matches!(action, Action::Copy(paths, moving) if paths == &selected && *moving == cut)
+        })
+    };
+    let pastes = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|action| matches!(action, Action::Paste(to) if to == &folder))
+            .count()
+    };
+    // The native window reports Command+X, C and V as these events, never as
+    // pressed keys.
+    let (actions, _) = harness.frame(vec![egui::Event::Cut]);
+    assert!(
+        copied(&actions, true),
+        "Command+X did not cut the selection"
+    );
+    let (actions, _) = harness.frame(vec![egui::Event::Copy]);
+    assert!(
+        copied(&actions, false),
+        "Command+C did not copy the selection"
+    );
+    // With text on the system clipboard the press pastes, and its release
+    // does not paste again.
+    let (actions, _) = harness.frame(vec![egui::Event::Paste("notes".into())]);
+    assert_eq!(pastes(&actions), 1);
+    let (actions, _) = harness.frame(vec![key(Key::V, false, false, Modifiers::COMMAND)]);
+    assert_eq!(pastes(&actions), 0);
+    // With no text there, the press reports nothing and the release pastes.
+    let (actions, _) = harness.frame(vec![key(Key::V, false, false, Modifiers::COMMAND)]);
+    assert_eq!(pastes(&actions), 1);
+    let (actions, _) = harness.frame(vec![
+        egui::Event::Paste("notes".into()),
+        key(Key::V, false, false, Modifiers::COMMAND),
+    ]);
+    assert_eq!(pastes(&actions), 1, "one quick chord pasted twice");
+    let (actions, _) = harness.frame(vec![press(Key::V), release(Key::V)]);
+    assert_eq!(pastes(&actions), 0, "a plain V pasted");
+}
+
+#[test]
+fn cut_items_fade_until_the_clipboard_changes() {
+    for view in [ViewMode::List, ViewMode::Grid] {
+        let mut harness = Harness::new(4);
+        harness.config.view = view;
+        let entries = harness.workspace.pane().entries.clone();
+        harness.state.cut.insert(entries[1].path.clone());
+        harness.warm();
+        let alpha = |output: &egui::FullOutput, name: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == name => text
+                        .galley
+                        .rows
+                        .iter()
+                        .flat_map(|row| row.row.visuals.mesh.vertices.iter())
+                        .map(|vertex| vertex.color.a())
+                        .max(),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{name} was not painted in {view:?}"))
+        };
+        let (_, output) = harness.frame(Vec::new());
+        assert!(
+            alpha(&output, &entries[1].name) < alpha(&output, &entries[0].name),
+            "a cut item looks like the others in {view:?}"
+        );
+        harness.state.cut.clear();
+        let (_, output) = harness.frame(Vec::new());
+        assert_eq!(
+            alpha(&output, &entries[1].name),
+            alpha(&output, &entries[0].name),
+            "an item stayed faded after the clipboard changed in {view:?}"
+        );
+    }
 }
 
 #[test]

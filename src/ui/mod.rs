@@ -145,6 +145,12 @@ pub struct UiState {
     pub brand_icon: Option<egui::TextureHandle>,
     pub busy: usize,
     pub can_paste: bool,
+    /// Items cut to the clipboard, shown faded until they are pasted or the
+    /// clipboard holds something else.
+    pub cut: std::collections::HashSet<PathBuf>,
+    /// The paste chord held down has already pasted, so its release must not
+    /// paste again.
+    pub pasted: bool,
     pub focus_search: bool,
     pub focus_dialog: bool,
     pub location: Option<LocationEdit>,
@@ -217,6 +223,8 @@ impl UiState {
             brand_icon: None,
             busy: 0,
             can_paste: false,
+            cut: Default::default(),
+            pasted: false,
             focus_search: false,
             focus_dialog: true,
             location: None,
@@ -480,6 +488,36 @@ fn toggle_sidebar(
 fn take(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
     ctx.input_mut(|i| i.consume_key(modifiers, key))
 }
+/// Whether this frame asks to copy, cut or paste. The native window reports
+/// Command+C, X and V as Copy, Cut and Paste events, never as pressed keys,
+/// and sends Paste only while the system clipboard holds text; without any,
+/// releasing V pastes instead, unless that press already pasted.
+fn clipboard_chords(ctx: &egui::Context, pasted: &mut bool) -> (bool, bool, bool) {
+    ctx.input(|i| {
+        let (mut copy, mut cut, mut paste) = (false, false, false);
+        for event in &i.events {
+            match event {
+                egui::Event::Copy => copy = true,
+                egui::Event::Cut => cut = true,
+                egui::Event::Paste(_) => {
+                    paste = true;
+                    *pasted = true;
+                }
+                egui::Event::Key {
+                    key: key @ (Key::V | Key::Paste),
+                    pressed: false,
+                    modifiers,
+                    ..
+                } => {
+                    let chord = *key == Key::Paste || modifiers.command;
+                    paste |= !std::mem::take(pasted) && chord;
+                }
+                _ => {}
+            }
+        }
+        (copy, cut, paste)
+    })
+}
 fn keyboard(
     ctx: &egui::Context,
     workspace: &mut Workspace,
@@ -592,19 +630,14 @@ fn keyboard(
     if ctx.text_edit_focused() {
         return;
     }
-    if take(ctx, command, Key::C) {
+    let (copy, cut, paste) = clipboard_chords(ctx, &mut state.pasted);
+    if copy || cut {
         actions.push(Action::Copy(
             workspace.pane().selected.iter().cloned().collect(),
-            false,
+            cut,
         ));
     }
-    if take(ctx, command, Key::X) {
-        actions.push(Action::Copy(
-            workspace.pane().selected.iter().cloned().collect(),
-            true,
-        ));
-    }
-    if take(ctx, command, Key::V) {
+    if paste {
         actions.push(Action::Paste(workspace.pane().path.clone()));
     }
     // Ubuntu Files' and Windows' Alt+Enter, and Finder's Get Info chord. The
