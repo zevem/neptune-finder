@@ -24,3 +24,19 @@ pub struct Launch {
     pub screenshot: Option<PathBuf>,
     pub no_restore: bool,
 }
+impl Launch {
+    /// Where settings, the saved session and the window size are kept.
+    pub fn data_root(&self) -> PathBuf {
+        self.data_root.clone().unwrap_or_else(|| {
+            directories::ProjectDirs::from("rs", "Neptune", "NeptuneFinder")
+                .map(|d| d.config_dir().to_path_buf())
+                .unwrap_or_else(|| home_dir().join(".neptune-finder"))
+        })
+    }
+}
+/// The user's home directory, or the filesystem root without one.
+pub fn home_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "C:\\" } else { "/" }))
+}

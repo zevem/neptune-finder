@@ -2,7 +2,8 @@
 
 Neptune Finder opens your home directory by default. A directory passed on the
 command line opens directly. Preferences and session directories restore on the
-next launch unless restoration is disabled.
+next launch unless restoration is disabled. The window reopens at the size it
+last had, and maximized if it was closed maximized.
 
 ## Navigation and views
 
@@ -214,8 +215,13 @@ and favorites are saved in Finder's own configuration/session storage.
 For an isolated launch, pass `--data-root PATH`. `--config PATH` selects an
 explicit TOML preferences file but does not isolate session storage.
 `--no-restore` ignores restored tabs for that launch while allowing future saves.
+The window size is saved apart from the session, in `window.json` beside it, so
+`--no-restore` and disabled session restoration keep it. `--size WIDTHxHEIGHT`
+opens one launch at that size instead; resizing that window saves as usual.
 If settings/session data is unreadable, malformed or from a future schema,
 Finder preserves it and disables saving for that launch, with a visible warning.
+A damaged saved window size is preserved the same way, and the window opens at
+the default size.
 
 Example configuration values match the fields in `src/config.rs`:
 
