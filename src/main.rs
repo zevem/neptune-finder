@@ -1,6 +1,11 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-use neptune_finder::{Launch, app::FinderApp, config::Theme};
-use std::path::PathBuf;
+use neptune_finder::{
+    Launch,
+    app::FinderApp,
+    config::Theme,
+    persistence::{self, WindowLoad, WindowState},
+};
+use std::{path::PathBuf, time::Duration};
 fn main() {
     if let Err(error) = run() {
         eprintln!("Neptune Finder: {error}");
@@ -70,7 +75,7 @@ fn run() -> Result<(), String> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Neptune Finder — a native GPU file explorer\n\nUsage: neptune-finder [PATH] [OPTIONS]\n  --path DIR           Open a directory\n  --data-root DIR      Isolate settings and saved session\n  --config FILE        Use a TOML configuration\n  --theme THEME        graphite, dusk, light\n  --no-restore         Start a fresh session\n  --size WIDTHxHEIGHT  Initial window size\n  --screenshot FILE    Capture the real native window and exit\n  --benchmark DIR     Measure a directory scan without a GUI\n  --version\n  --help"
+                    "Neptune Finder — a native GPU file explorer\n\nUsage: neptune-finder [PATH] [OPTIONS]\n  --path DIR           Open a directory\n  --data-root DIR      Isolate settings, session and window size\n  --config FILE        Use a TOML configuration\n  --theme THEME        graphite, dusk, light\n  --no-restore         Start a fresh session\n  --size WIDTHxHEIGHT  Open at this size, not the saved one\n  --screenshot FILE    Capture the real native window and exit\n  --benchmark DIR     Measure a directory scan without a GUI\n  --version\n  --help"
                 );
                 return Ok(());
             }
@@ -98,11 +103,21 @@ fn run() -> Result<(), String> {
         );
         return Ok(());
     }
-    let options = eframe::NativeOptions {
+    // Captures ignore the saved window and never replace it.
+    let mut window = if launch.screenshot.is_some() {
+        WindowLoad::default()
+    } else {
+        persistence::restore_window(&launch.data_root(), Duration::from_millis(250))
+    };
+    if let Some(size) = launch.size {
+        window.state.inner_size = size;
+        window.state.maximized = false;
+    }
+    let mut options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Neptune Finder")
-            .with_inner_size(launch.size.unwrap_or([1240.0, 800.0]))
-            .with_min_inner_size([520.0, 360.0])
+            .with_inner_size(window.state.inner_size)
+            .with_min_inner_size(WindowState::MIN_SIZE)
             .with_app_id("rs.neptune.finder")
             .with_decorations(false)
             // Match Terminal: Windows supplies the native border and rounding.
@@ -131,10 +146,13 @@ fn run() -> Result<(), String> {
         ),
         ..Default::default()
     };
+    // Ask only to maximize. A window that was not maximized opens as it always
+    // has, without an unmaximize request as it appears.
+    options.viewport.maximized = window.state.maximized.then_some(true);
     eframe::run_native(
         "Neptune Finder",
         options,
-        Box::new(move |cc| Ok(Box::new(FinderApp::new(cc, launch)))),
+        Box::new(move |cc| Ok(Box::new(FinderApp::new(cc, launch, window)))),
     )
     .map_err(|e| e.to_string())
 }

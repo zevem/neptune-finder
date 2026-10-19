@@ -84,8 +84,9 @@ freedesktop.org thumbnail cache is read, validated against each file's URI
 and modification time, and never written. Symbolic links must not
 turn a recursive walk into a cycle, and a slow mount must not block a UI frame.
 Diagnostics exclude paths, names and contents. Saved sessions store navigation
-and settings, never operation queues or file contents. Saved path serialization
-preserves native non-UTF-8 path identities rather than lossy display strings.
+and settings, and a separate file stores the window size; neither holds
+operation queues or file contents. Saved path serialization preserves native
+non-UTF-8 path identities rather than lossy display strings.
 
 ## Verification
 

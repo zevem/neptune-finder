@@ -24,9 +24,9 @@ The launcher uses `cargo run --release --locked --bin neptune-finder` with the
 pinned toolchain and forwards all arguments to Finder. Cargo rebuilds only when
 needed. You can invoke the script by its absolute path from another directory.
 
-`--data-root PATH` isolates preferences and session state. `--no-restore` starts
-without restored tabs but does not isolate future writes. Use a task-owned data
-root for every test launch, including relaunches.
+`--data-root PATH` isolates preferences, session and window state.
+`--no-restore` starts without restored tabs but does not isolate future writes.
+Use a task-owned data root for every test launch, including relaunches.
 
 ## Focused verification
 

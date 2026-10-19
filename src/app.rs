@@ -2,7 +2,7 @@ use crate::{
     Launch,
     config::Config,
     model::{Pane, Tab, Workspace},
-    persistence::Storage,
+    persistence::{Storage, WindowLoad, WindowState},
     preview::{PreviewContent, Previews},
     thumbnails::{self, Thumbnails},
     ui::{self, Action, Dialog, UiState},
@@ -53,6 +53,13 @@ pub struct FinderApp {
     search_deadline: Option<(Instant, u64)>,
     watch_deadline: Option<Instant>,
     save_deadline: Option<Instant>,
+    /// The window as last seen, saved apart from the session.
+    window: WindowState,
+    window_writable: bool,
+    window_warning: Option<String>,
+    /// The window opened maximized, which the OS may still be applying.
+    restore_maximized: bool,
+    window_deadline: Option<Instant>,
     preview_generation: u64,
     /// The Properties sheet's request; zero while no sheet is open.
     properties_generation: u64,
@@ -61,24 +68,18 @@ pub struct FinderApp {
     ephemeral: bool,
 }
 impl FinderApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch, window: WindowLoad) -> Self {
         crate::fonts::install(&cc.egui_ctx);
         // Finder steps the zoom itself, so it is saved and named as it changes.
         cc.egui_ctx
             .options_mut(|options| options.zoom_with_keyboard = false);
-        let home = directories::BaseDirs::new()
-            .map(|d| d.home_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "C:\\" } else { "/" }));
+        let home = crate::home_dir();
         let path = launch
             .path
             .as_deref()
             .map(absolute)
             .unwrap_or_else(|| home.clone());
-        let root = launch.data_root.clone().unwrap_or_else(|| {
-            directories::ProjectDirs::from("rs", "Neptune", "NeptuneFinder")
-                .map(|d| d.config_dir().to_path_buf())
-                .unwrap_or_else(|| home.join(".neptune-finder"))
-        });
+        let root = launch.data_root();
         let config_path = launch
             .config
             .clone()
@@ -144,6 +145,11 @@ impl FinderApp {
             search_deadline: None,
             watch_deadline: None,
             save_deadline: None,
+            window: window.state,
+            window_writable: window.writable,
+            window_warning: window.warning,
+            restore_maximized: window.state.maximized,
+            window_deadline: None,
             preview_generation: 0,
             properties_generation: 0,
             started: Instant::now(),
@@ -253,7 +259,12 @@ impl FinderApp {
             self.applied_hidden = self.config.show_hidden;
             crate::theme::apply(ctx, &self.config);
             ctx.set_zoom_factor(self.config.window_zoom);
-            self.ui.notice = boot.warning.map(ui::Notice::problem);
+            let warnings = [self.window_warning.take(), boot.warning]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            self.ui.notice =
+                (!warnings.is_empty()).then(|| ui::Notice::problem(warnings.join("\n")));
             self.initialized = true;
             self.reload_visible(ctx);
             self.watch_visible();
@@ -427,7 +438,52 @@ impl FinderApp {
                 ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
             }
         }
+        if let Some(deadline) = self.window_deadline {
+            if Instant::now() >= deadline {
+                self.window_deadline = None;
+                self.storage.save_window(self.window);
+            } else {
+                ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+            }
+        }
         self.ui.busy = self.busy.len();
+    }
+    /// Notes the window's size and maximized state, to save once resizing
+    /// pauses.
+    fn observe_window(&mut self, ctx: &egui::Context) {
+        if self.ephemeral || !self.window_writable {
+            return;
+        }
+        if self.restore_maximized {
+            // eframe shows the window after its first frame, and some window
+            // managers ignore a maximize requested before then. Ask again, and
+            // keep the size the OS reports meanwhile from replacing the saved
+            // one.
+            if ctx.input(|i| i.viewport().maximized) != Some(true)
+                && self.started.elapsed() < Duration::from_secs(2)
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                ctx.request_repaint_after(Duration::from_millis(30));
+                return;
+            }
+            self.restore_maximized = false;
+        }
+        // Native logical pixels, not zoomed points, so a zoomed window
+        // reopens at its size rather than shrinking each launch.
+        let size = (ctx.input(|i| i.viewport_rect().size()) * ctx.zoom_factor()).round();
+        let changed = ctx.input(|i| {
+            let viewport = i.viewport();
+            self.window.observe(
+                size.into(),
+                viewport.maximized,
+                viewport.minimized.unwrap_or(false),
+                viewport.fullscreen.unwrap_or(false),
+            )
+        });
+        if changed {
+            self.window_deadline = Some(Instant::now() + Duration::from_millis(350));
+            ctx.request_repaint_after(Duration::from_millis(350));
+        }
     }
     /// Holds paths for Paste, to move them when cut. Cut items show faded
     /// until the clipboard changes.
@@ -940,6 +996,7 @@ impl eframe::App for FinderApp {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll(&ctx);
+        self.observe_window(&ctx);
         if !self.busy.is_empty() && ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.ui.notice = Some(ui::Notice::info(
@@ -983,6 +1040,9 @@ impl eframe::App for FinderApp {
         if self.initialized && self.writable && !self.ephemeral {
             self.storage
                 .save(self.workspace.snapshot(self.config.clone()));
+        }
+        if self.window_deadline.is_some() {
+            self.storage.save_window(self.window);
         }
         self.storage.finish();
     }
