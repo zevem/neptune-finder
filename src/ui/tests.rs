@@ -482,6 +482,46 @@ fn a_rectangle_past_the_bottom_scrolls_on_and_keeps_covering() {
 }
 
 #[test]
+fn icon_view_asks_for_visible_files_only_and_draws_their_thumbnails() {
+    use crate::thumbnails::{Picture, Thumbnail};
+    let mut harness = Harness::new(100_000);
+    harness.config.view = ViewMode::Grid;
+    harness.workspace.pane_mut().entries[0].kind = EntryKind::Directory;
+    harness.frame(Vec::new());
+    let wanted = harness.state.thumbnails.end_frame();
+    let entries = &harness.workspace.pane().entries;
+    assert!(!wanted.is_empty() && wanted.len() < 100);
+    assert_eq!(wanted[0].path, entries[1].path, "folders have no thumbnail");
+    let file = entries[1].clone();
+
+    harness.state.thumbnails.insert(
+        &harness.ctx,
+        Thumbnail {
+            key: wanted[0].clone(),
+            picture: Some(Picture {
+                image: egui::ColorImage::filled([8, 8], egui::Color32::WHITE),
+                opaque: true,
+            }),
+        },
+    );
+    let (_, output) = harness.frame(Vec::new());
+    let texture = harness
+        .state
+        .thumbnails
+        .get(&file, wanted[0].pixels)
+        .expect("uploaded thumbnail")
+        .handle
+        .id();
+    let primitives = harness.ctx.tessellate(output.shapes, 1.0);
+    assert!(primitives.iter().any(|primitive| matches!(
+        &primitive.primitive,
+        egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture
+    )));
+    let wanted = harness.state.thumbnails.end_frame();
+    assert!(!wanted.iter().any(|key| key.path == file.path));
+}
+
+#[test]
 fn chrome_focus_owns_enter_space_and_arrows() {
     let mut harness = Harness::new(20);
     harness.workspace.pane_mut().select(0, false, false);

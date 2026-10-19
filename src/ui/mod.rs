@@ -146,6 +146,7 @@ pub struct UiState {
     pub file_widgets: std::collections::HashSet<egui::Id>,
     pub file_owners: std::collections::HashMap<egui::Id, u64>,
     pub grid_columns: std::collections::HashMap<u64, usize>,
+    pub thumbnails: crate::thumbnails::Cache,
 }
 impl UiState {
     pub fn new(home: PathBuf) -> Self {
@@ -211,6 +212,7 @@ impl UiState {
             file_widgets: Default::default(),
             file_owners: Default::default(),
             grid_columns: Default::default(),
+            thumbnails: Default::default(),
         }
     }
     pub fn open_dialog(&mut self, dialog: Dialog) {

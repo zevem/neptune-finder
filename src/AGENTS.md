@@ -13,6 +13,7 @@ backend internals through the core API.
 | Listing, filtering and recursive search | `../crates/finder-core/` |
 | Navigation, stable selection and saved session DTOs | `model.rs` |
 | Bounded text/image Quick Look workers | `preview.rs` |
+| Icon-view thumbnail workers and uploaded-texture budget | `thumbnails.rs` |
 | Filesystem mutation, cancellation and collision handling | `../crates/finder-operations/` |
 | Settings, paths and saved-state protection | `config.rs`, `persistence.rs` |
 | Shared palette, fonts and icons | `theme.rs`, `fonts.rs`, `icons.rs` |

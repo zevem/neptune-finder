@@ -29,7 +29,7 @@ The stall was reproduced in Terminal under XWayland, not yet in Finder.
 | Search cancellation and first result latency | Responsiveness while typing or switching folders |
 | Idle process CPU/RSS | Whether a settled window sleeps and retains bounded state |
 | Copy/move throughput and cancellation latency | End-to-end operation behavior |
-| RSS with large folders and image previews | Retained state, textures and snapshot bounds |
+| RSS with large folders, image previews and icon-view thumbnails | Retained state, textures and snapshot bounds |
 
 Use optimized release builds. Record commit, lockfile, toolchain, OS, CPU, RAM,
 GPU/backend, display scale, dimensions, filesystem/mount, dataset size and whether
