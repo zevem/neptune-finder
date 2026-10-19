@@ -238,6 +238,40 @@ fn window_chrome_keeps_the_rounded_corners_clear() {
 }
 
 #[test]
+fn the_sidebar_overlay_keeps_the_rounded_corners_clear_while_it_slides() {
+    use crate::config::Theme;
+    let size = vec2(600.0, 420.0);
+    let rounded = !cfg!(windows);
+    for theme in [Theme::Graphite, Theme::Dusk, Theme::Light] {
+        let mut harness = Harness::new(5);
+        harness.config.theme = theme;
+        crate::theme::apply(&harness.ctx, &harness.config);
+        harness.frame_at(Vec::new(), size, None);
+        // Every frame of the slide in and out, including the first, when
+        // only a sliver of the overlay is inside the window.
+        for open in [true, false] {
+            harness.state.sidebar_overlay = open;
+            for frame in 0..14 {
+                let (_, output) = harness.frame_at(Vec::new(), size, None);
+                let primitives = harness.ctx.tessellate(output.shapes, 1.0);
+                for point in [
+                    egui::pos2(2.5, 2.5),
+                    egui::pos2(size.x - 2.5, 2.5),
+                    egui::pos2(2.5, size.y - 2.5),
+                    egui::pos2(size.x - 2.5, size.y - 2.5),
+                ] {
+                    assert_eq!(
+                        painted_at(&primitives, point),
+                        !rounded,
+                        "window corner {point:?}: {theme:?}, open={open}, frame {frame}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn window_edges_and_all_four_corners_start_native_resize() {
     use egui::ResizeDirection::*;
     let size = vec2(1_024.0, 720.0);
@@ -1522,5 +1556,99 @@ fn properties_stay_open_through_the_opening_chord_and_fit_a_narrow_window() {
     assert!(
         harness.state.properties.is_none(),
         "closing kept the item's properties"
+    );
+}
+
+#[test]
+fn a_narrow_window_opens_the_sidebar_over_files_and_closes_it_after_a_choice() {
+    let mut harness = Harness::new(20);
+    harness.workspace.pane_mut().select(0, false, false);
+    let selected = harness.workspace.pane().selected.clone();
+    let chord = if cfg!(target_os = "macos") {
+        Modifiers::COMMAND
+    } else {
+        Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    let narrow = vec2(600.0, 480.0);
+    let settle = |harness: &mut Harness, size: Vec2| {
+        for _ in 0..20 {
+            harness.frame_at(Vec::new(), size, None);
+        }
+    };
+    settle(&mut harness, narrow);
+
+    // The chord opens the overlay without changing the docked preference.
+    let (actions, _) = harness.frame_at(vec![key(Key::B, true, false, chord)], narrow, None);
+    assert!(harness.state.sidebar_overlay);
+    assert!(!harness.config.sidebar);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::PreferencesChanged))
+    );
+    settle(&mut harness, narrow);
+
+    // The mouse's history buttons leave the files under it alone.
+    let point = egui::pos2(420.0, 300.0);
+    let (actions, _) = harness.frame_at(
+        vec![
+            egui::Event::PointerMoved(point),
+            pointer_button(point, egui::PointerButton::Extra1, true),
+        ],
+        narrow,
+        None,
+    );
+    assert!(travels(&actions).is_empty());
+    harness.frame_at(
+        vec![pointer_button(point, egui::PointerButton::Extra1, false)],
+        narrow,
+        None,
+    );
+    assert!(harness.state.sidebar_overlay);
+
+    // Escape closes it and leaves the file selection alone.
+    harness.frame_at(vec![press(Key::Escape)], narrow, None);
+    assert!(!harness.state.sidebar_overlay);
+    assert_eq!(harness.workspace.pane().selected, selected);
+    harness.frame_at(vec![release(Key::Escape)], narrow, None);
+
+    // Choosing a place navigates there and closes it.
+    harness.state.sidebar_overlay = true;
+    settle(&mut harness, narrow);
+    let home = egui::pos2(60.0, 87.0);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: home,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    harness.frame_at(vec![egui::Event::PointerMoved(home)], narrow, None);
+    harness.frame_at(vec![button(true)], narrow, None);
+    let (actions, _) = harness.frame_at(vec![button(false)], narrow, None);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Navigate(_, path) if path == &harness.state.home))
+    );
+    assert!(!harness.state.sidebar_overlay);
+
+    // A window wide enough to dock the sidebar closes the overlay.
+    harness.state.sidebar_overlay = true;
+    settle(&mut harness, narrow);
+    harness.frame_at(Vec::new(), vec2(1_024.0, 720.0), None);
+    assert!(!harness.state.sidebar_overlay);
+
+    // In a wide window the chord still docks or hides the sidebar.
+    let (actions, _) = harness.frame_at(
+        vec![key(Key::B, true, false, chord)],
+        vec2(1_024.0, 720.0),
+        None,
+    );
+    assert!(harness.config.sidebar);
+    assert!(!harness.state.sidebar_overlay);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::PreferencesChanged))
     );
 }

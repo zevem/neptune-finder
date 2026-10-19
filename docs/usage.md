@@ -28,10 +28,11 @@ current thumbnail that another application (such as GNOME Files) already saved
 is reused, which covers videos, PDFs and other formats. Other files keep their
 kind glyph, and thumbnails appear as they finish.
 Folders appear first; hidden files are configurable. Each pane's path bar
-shows where it is and how many items it holds or has selected. The sidebar
-yields space in narrow windows; toggle it from the toolbar or with
-Command+Shift+B (⌘B on macOS), and drag its trailing
-edge to resize it. A loading state
+shows where it is and how many items it holds or has selected. Toggle the
+sidebar from the toolbar or with Command+Shift+B (⌘B on macOS), and drag its
+trailing edge to resize it. In narrow windows it yields its space to files;
+the same button or shortcut then opens it over the files, and it closes again
+once you choose a place, click outside it or press Escape. A loading state
 appears while a worker reads a directory, and unavailable locations show errors
 without freezing navigation.
 

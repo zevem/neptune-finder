@@ -152,6 +152,9 @@ pub struct UiState {
     pub path_bar: bool,
     /// The sidebar's width while its trailing edge is dragged.
     pub sidebar_drag: Option<f32>,
+    /// The sidebar is open over the files of a window too narrow to keep it
+    /// beside them. It is never saved; the docked preference stays as it was.
+    pub sidebar_overlay: bool,
     /// The Preferences pane in view while the app runs.
     pub preferences_pane: dialogs::PreferencesPane,
     pub file_widgets: std::collections::HashSet<egui::Id>,
@@ -219,6 +222,7 @@ impl UiState {
             location: None,
             path_bar: false,
             sidebar_drag: None,
+            sidebar_overlay: false,
             preferences_pane: dialogs::PreferencesPane::General,
             file_widgets: Default::default(),
             file_owners: Default::default(),
@@ -261,7 +265,29 @@ pub fn show(
     let ctx = ui.ctx().clone();
     let p = Palette::for_config(config);
     let bounds = ui.max_rect();
-    keyboard(&ctx, workspace, config, state, actions);
+    // The sidebar yields to files in narrow windows, and opens over them on
+    // request instead.
+    let available = bounds.width() >= theme::metrics::SIDEBAR_MIN_WINDOW;
+    if available || state.dialog.is_some() {
+        state.sidebar_overlay = false;
+    }
+    // The sidebar spans the full height, like a native source list, and
+    // slides when toggled. Both slides are sampled before keys are handled: a
+    // toggle starts from the next frame, so the first frame after an idle
+    // window cannot carry the whole slide.
+    let reveal = ctx.animate_bool_with_time_and_easing(
+        egui::Id::new("finder-sidebar-reveal").with(ctx.viewport_id()),
+        config.sidebar && available,
+        if available { SIDEBAR_SLIDE } else { 0.0 },
+        egui::emath::easing::cubic_out,
+    );
+    let overlay = ctx.animate_bool_with_time_and_easing(
+        egui::Id::new("finder-sidebar-overlay-reveal").with(ctx.viewport_id()),
+        state.sidebar_overlay,
+        if available { 0.0 } else { SIDEBAR_SLIDE },
+        egui::emath::easing::cubic_out,
+    );
+    keyboard(&ctx, workspace, config, state, available, actions);
     state.file_widgets.clear();
     state.file_owners.clear();
     state.grid_columns.clear();
@@ -270,15 +296,6 @@ pub fn show(
     // fills of their own, so the transparent corners stay clear.
     ui.painter().rect_filled(bounds, radius, p.chrome);
 
-    // The sidebar spans the full height, like a native source list. It yields
-    // to files in narrow windows, and slides when toggled.
-    let available = bounds.width() >= theme::metrics::SIDEBAR_MIN_WINDOW;
-    let reveal = ctx.animate_bool_with_time_and_easing(
-        egui::Id::new("finder-sidebar-reveal").with(ctx.viewport_id()),
-        config.sidebar && available,
-        if available { SIDEBAR_SLIDE } else { 0.0 },
-        egui::emath::easing::cubic_out,
-    );
     let width = state
         .sidebar_drag
         .unwrap_or(config.sidebar_width)
@@ -307,15 +324,11 @@ pub fn show(
             bounds.top() + theme::metrics::TOOLBAR_HEIGHT,
         ),
     );
-    let leading = if available {
-        egui::lerp(chrome::TOGGLE_HIDDEN..=width - 22.0, reveal) + 24.0
-    } else {
-        chrome::TOGGLE_HIDDEN - 16.0
-    };
+    let toggle = egui::lerp(chrome::TOGGLE_HIDDEN..=width - 22.0, reveal);
     chrome::toolbar(
         ui,
         toolbar,
-        (bounds.left() + leading).max(toolbar.left() + 8.0),
+        (bounds.left() + toggle + 24.0).max(toolbar.left() + 8.0),
         workspace,
         config,
         state,
@@ -343,7 +356,14 @@ pub fn show(
     if stage.is_positive() {
         content::panes(ui, stage, workspace, config, state, p, actions);
     }
-    chrome::leading_controls(ui, bounds, p, config, available, reveal, width, actions);
+    // The open overlay carries the window controls and toggle with it.
+    if overlay > 0.0 {
+        chrome::sidebar_overlay(
+            ui, bounds, width, overlay, workspace, config, state, p, actions,
+        );
+    } else if chrome::leading_controls(ui, bounds, p, toggle, actions) {
+        toggle_sidebar(config, state, available, actions);
+    }
     if radius > 0 {
         ui.painter().rect_stroke(
             bounds,
@@ -411,7 +431,7 @@ fn history_buttons(
     stage: Rect,
     actions: &mut Vec<Action>,
 ) {
-    if state.dialog.is_some() {
+    if state.dialog.is_some() || state.sidebar_overlay {
         return;
     }
     let presses = ctx.input(|i| {
@@ -441,6 +461,22 @@ fn history_buttons(
     }
 }
 
+/// Docks or hides the sidebar in a wide window; opens or closes it over the
+/// files in a narrow one, leaving the saved preference alone.
+fn toggle_sidebar(
+    config: &mut Config,
+    state: &mut UiState,
+    available: bool,
+    actions: &mut Vec<Action>,
+) {
+    if available {
+        config.sidebar = !config.sidebar;
+        actions.push(Action::PreferencesChanged);
+    } else {
+        state.sidebar_overlay = !state.sidebar_overlay;
+    }
+}
+
 fn take(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
     ctx.input_mut(|i| i.consume_key(modifiers, key))
 }
@@ -449,6 +485,7 @@ fn keyboard(
     workspace: &mut Workspace,
     config: &mut Config,
     state: &mut UiState,
+    available: bool,
     actions: &mut Vec<Action>,
 ) {
     let command = Modifiers::COMMAND;
@@ -463,6 +500,20 @@ fn keyboard(
         actions.push(Action::Zoom(ZoomStep::Reset));
     }
     if state.dialog.is_some() {
+        return;
+    }
+    // Terminal's sidebar chord, so both windows answer the same keys.
+    let host = if cfg!(target_os = "macos") {
+        Modifiers::COMMAND
+    } else {
+        Modifiers::COMMAND | Modifiers::SHIFT
+    };
+    if take(ctx, host, Key::B) {
+        toggle_sidebar(config, state, available, actions);
+        ctx.request_repaint();
+    }
+    // The overlay owns the remaining keys while open; Escape closes it.
+    if state.sidebar_overlay {
         return;
     }
     if let Some(owner) = ctx
@@ -537,16 +588,6 @@ fn keyboard(
     }
     if take(ctx, command, Key::Backslash) {
         actions.push(Action::ToggleSplit);
-    }
-    // Terminal's sidebar chord, so both windows answer the same keys.
-    let host = if cfg!(target_os = "macos") {
-        command
-    } else {
-        shift
-    };
-    if take(ctx, host, Key::B) {
-        config.sidebar = !config.sidebar;
-        actions.push(Action::PreferencesChanged);
     }
     if ctx.text_edit_focused() {
         return;
