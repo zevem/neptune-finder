@@ -540,3 +540,59 @@ fn narrow_split_views_and_scrollable_preferences_remain_bounded() {
         "preferences could not close in a narrow window"
     );
 }
+
+#[test]
+fn zoom_chords_step_the_saved_zoom_over_files_fields_and_dialogs() {
+    let zooms = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Zoom(step) => Some(*step),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for owner in ["files", "search", "dialog"] {
+        let mut harness = Harness::new(5);
+        match owner {
+            "search" => harness.state.focus_search = true,
+            "dialog" => harness.state.open_dialog(Dialog::Preferences),
+            _ => {}
+        }
+        harness.warm();
+        assert_eq!(harness.ctx.text_edit_focused(), owner == "search");
+        for (key_value, modifiers, step) in [
+            (Key::Equals, Modifiers::COMMAND, ZoomStep::In),
+            (
+                Key::Plus,
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                ZoomStep::In,
+            ),
+            (Key::Minus, Modifiers::COMMAND, ZoomStep::Out),
+            (Key::Num0, Modifiers::COMMAND, ZoomStep::Reset),
+        ] {
+            let (actions, _) = harness.frame(vec![key(key_value, true, false, modifiers)]);
+            assert_eq!(zooms(&actions), vec![step], "{key_value:?} over {owner}");
+            harness.frame(vec![key(key_value, false, false, modifiers)]);
+            // The app owns the zoom, so the toolkit's own shortcut stays out.
+            assert_eq!(harness.ctx.zoom_factor(), 1.0);
+        }
+        assert_eq!(harness.state.dialog.is_some(), owner == "dialog");
+    }
+}
+
+#[test]
+fn a_zoom_chip_shows_its_value_then_leaves() {
+    let mut harness = Harness::new(5);
+    harness.warm();
+    harness.state.level = Some(crate::controls::Level {
+        name: "Window zoom",
+        value: "110%".into(),
+        shown: harness.time,
+    });
+    harness.frame(Vec::new());
+    assert!(harness.state.level.is_some());
+    harness.time += 2.0;
+    harness.frame(Vec::new());
+    assert!(harness.state.level.is_none());
+}

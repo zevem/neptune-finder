@@ -199,6 +199,7 @@ mod tests {
         let workspace = crate::model::Workspace::new(root.path().to_owned());
         let config = Config {
             show_hidden: true,
+            window_zoom: 1.3,
             ..Config::default()
         };
         storage.save(workspace.snapshot(config));
@@ -206,6 +207,7 @@ mod tests {
         let boot = load(root.path(), &path);
         assert!(boot.writable);
         assert!(boot.config.show_hidden);
+        assert_eq!(boot.config.window_zoom, 1.3);
         assert!(boot.session.is_some());
     }
 }

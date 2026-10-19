@@ -5,7 +5,7 @@ mod dialogs;
 #[cfg(test)]
 mod tests;
 use crate::{
-    config::{Config, ViewMode},
+    config::{Config, ViewMode, ZoomStep},
     icons::Icon,
     model::Workspace,
     theme::{self, Palette},
@@ -41,6 +41,7 @@ pub enum Action {
     PreferencesChanged,
     View(ViewMode),
     Location(String),
+    Zoom(ZoomStep),
 }
 pub enum Dialog {
     New {
@@ -109,6 +110,8 @@ pub struct UiState {
     pub home: PathBuf,
     pub places: Vec<(Icon, String, PathBuf)>,
     pub notice: Option<Notice>,
+    /// The app zoom just stepped from the keyboard, named for a moment.
+    pub level: Option<crate::controls::Level>,
     pub dialog: Option<Dialog>,
     pub preview: Option<Preview>,
     pub brand_icon: Option<egui::TextureHandle>,
@@ -172,6 +175,7 @@ impl UiState {
             home,
             places,
             notice: None,
+            level: None,
             dialog: None,
             preview: None,
             brand_icon: None,
@@ -298,6 +302,11 @@ pub fn show(
     resize_edges(ui, bounds);
     dialogs::show(&ctx, workspace, config, state, p, actions);
     show_notice(&ctx, p, state);
+    if let Some(level) = &state.level
+        && !crate::controls::level(&ctx, p, level)
+    {
+        state.level = None;
+    }
 }
 
 /// Shows the current message. Problems wait for dismissal; anything else
@@ -351,6 +360,17 @@ fn keyboard(
     state: &mut UiState,
     actions: &mut Vec<Action>,
 ) {
+    let command = Modifiers::COMMAND;
+    // Terminal's app zoom chords, which also answer over dialogs and fields.
+    if take(ctx, command, Key::Plus) || take(ctx, command, Key::Equals) {
+        actions.push(Action::Zoom(ZoomStep::In));
+    }
+    if take(ctx, command, Key::Minus) {
+        actions.push(Action::Zoom(ZoomStep::Out));
+    }
+    if take(ctx, command, Key::Num0) {
+        actions.push(Action::Zoom(ZoomStep::Reset));
+    }
     if state.dialog.is_some() {
         return;
     }
@@ -363,7 +383,6 @@ fn keyboard(
             tab.active = index;
         }
     }
-    let command = Modifiers::COMMAND;
     let shift = Modifiers {
         shift: true,
         ..command
