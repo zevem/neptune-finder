@@ -949,6 +949,17 @@
       "unicode": "eac5",
       "sha256": "48b7dddf34a6b87e93843a42b14781ce01794cf69274c458249ed8bfc01b6e4d",
       "upstream_icon_version": "1.0"
+    },
+    {
+      "icon": "FolderFilled",
+      "style": "filled",
+      "name": "folder",
+      "file": "filled/folder.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/a4ce1404bc6d24d3c365afe7b258d6bf6f48d62d/icons/filled/folder.svg",
+      "unicode": "f749",
+      "sha256": "ab5483785164f8df172e7ca0c4b47ed567915d8bde9eef025f571a82bd54886b",
+      "upstream_icon_version": "2.4",
+      "meaning": "Finder: Folders listed among files, solid so they stand apart from outline file kinds and actions."
     }
   ]
 }

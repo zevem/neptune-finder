@@ -3,7 +3,7 @@
 All files in outline/ and filled/ are unmodified official Tabler Icons 3.49.0
 SVGs from commit `a4ce1404bc6d24d3c365afe7b258d6bf6f48d62d`. They retain upstream comments,
 `currentColor`, the 24×24 viewBox and the rounded 2-point outline strokes.
-Playback controls and solid status dots use the official filled style. No
+Playback controls, solid status dots and listed folders use the official filled style. No
 application-specific icon path is generated or traced.
 
 [mapping.json](mapping.json) is the complete native `Icon` mapping, with source
@@ -14,7 +14,7 @@ notice is preserved in [LICENSE.txt](LICENSE.txt).
 ## Native rendering
 
 The application embeds outline.ttf (89 glyphs, 23,464 bytes) and filled.ttf
-(4 glyphs, 1,360 bytes). Dedicated font families do not alter monospaced or UI text
+(5 glyphs, 1,460 bytes). Dedicated font families do not alter monospaced or UI text
 fallbacks. Call `icons::register_fonts` when constructing every font definition
 set, including asynchronously discovered system fonts, before `ctx.set_fonts`.
 Tabler glyphs need no per-frame file access, image decoding or SVG parsing.
@@ -39,9 +39,9 @@ remain the caller's responsibility.
 ## Neptune ecosystem provenance
 
 Terminal's 79 native mappings and their SVGs are copied byte-for-byte from
-Neptune Terminal. Finder adds fourteen outline glyphs a file explorer needs
-(listed last below) from the same pinned release, and regenerates the fonts
-with the shared generator; Terminal's glyph outlines are unchanged. Finder uses
+Neptune Terminal. Finder adds fourteen outline glyphs and one filled glyph a
+file explorer needs (listed last below) from the same pinned release, and
+regenerates the fonts with the shared generator; Terminal's glyph outlines are unchanged. Finder uses
 the same renderer and button interaction geometry. Terminal-specific provider artwork
 is not needed by the explorer and is not bundled here.
 
@@ -142,6 +142,7 @@ is not needed by the explorer and is not bundled here.
 | `Icon::Pin` | `pin` | outline | Finder: Pinned folders. |
 | `Icon::Scissors` | `scissors` | outline | Finder: Cut. |
 | `Icon::Info` | `info-circle` | outline | Finder: About Neptune Finder. |
+| `Icon::FolderFilled` | `folder` | filled | Finder: Folders listed among files, solid so they stand apart from outline file kinds and actions. |
 
 ## Reproducible generation
 
