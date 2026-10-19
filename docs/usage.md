@@ -47,8 +47,9 @@ file operations.
 Click selects an item. Ctrl-click (Command-click on macOS) toggles items;
 Shift-click selects a range. Arrow keys move selection, Shift extends it, and
 Select All selects the current result set. Open a selected folder with Enter or
-double-click; files request their operating system's default application. A
-middle click opens a file the same way without changing the selection.
+double-click; files request their operating system's default application,
+except ZIP archives, which extract (see [Archives](#archives)). A middle click
+opens a file the same way without changing the selection.
 
 Drag from empty space to draw a selection rectangle: between or below icons,
 below the last row, or anywhere in a list row other than its icon and name. The
@@ -78,6 +79,27 @@ deletion. Finder has no application-wide undo, permanent delete, merge/overwrite
 or mid-operation cancellation yet. Restore trashed items through the operating
 system. Native Reveal opens the containing folder on Linux and selects the item
 on macOS/Windows; native runtime acceptance is still required on those systems.
+
+## Archives
+
+Open a ZIP archive (`.zip`) with Enter, a double-click, a middle click or the
+context menu's Extract to extract it beside the archive. An archive holding one
+top-level item produces that item; several items are gathered in a folder named
+after the archive, as Ubuntu Files and macOS Finder do. Extract to… extracts
+into a typed folder, accepting `~` and paths relative to the archive's folder.
+An existing item is never replaced or merged: the result takes the next free
+name, such as “Photos 2”. Open in default app hands the archive to the operating
+system instead. Other formats, such as `.tar.gz` and `.7z`, still open in their
+default application.
+
+Compress… creates a ZIP archive of the selected items in the current folder,
+suggesting the item's name or “Archive.zip” for several. An existing archive
+name is reported rather than replaced. Archives keep file contents, symbolic
+links, Unix permissions and modification times (to ZIP's two-second precision).
+Password-protected archives, entries that would land outside the extracted
+folder and archives built to expand without limit are refused, and a failed
+extraction leaves nothing behind. See
+[the operation contract](../crates/finder-operations/README.md) for the limits.
 
 Regular file contents, file permissions/timestamps and symbolic links are
 preserved by copy. ACLs, extended attributes, resource forks, sparse allocation,
@@ -178,7 +200,7 @@ and modal dialogs retain their own text/selection shortcuts.
 | Move selected items to Trash | Delete; ⌘Backspace on macOS |
 | Quick Look | Space |
 | Properties | Alt+Enter or Command+I |
-| Open selected item | Enter |
+| Open selected item; extract a ZIP archive | Enter |
 | Preferences | Command+, |
 | Zoom in / out / actual size | Command+= or Command++ / Command+- / Command+0 |
 | Clear selection | Escape |

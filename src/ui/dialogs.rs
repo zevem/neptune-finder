@@ -176,6 +176,94 @@ pub fn show(
                 close = true;
             }
         }
+        Dialog::Compress {
+            sources,
+            destination,
+            name,
+        } => {
+            let mut submit = false;
+            let output = controls::sheet(ctx, p, "Compress", 400.0, SheetPlacement::Center, |ui| {
+                close |= controls::sheet_header(ui, p, "Compress", Some("Close compress dialog"));
+                scroll_body(ui, ctx, "compress-body", |ui| {
+                    let items = match sources.as_slice() {
+                        [source] => format!("“{}”", super::name(source)),
+                        _ => format!("{} items", sources.len()),
+                    };
+                    caption(
+                        ui,
+                        p,
+                        &format!(
+                            "A ZIP archive of {items}, in {}",
+                            super::display_path(destination, &state.home)
+                        ),
+                    );
+                    ui.add_space(12.0);
+                    name_field(ui, p, name, &mut state.focus_dialog, "compress-name");
+                    validation_message(ui, p, name);
+                });
+                let valid = !sources.is_empty() && validate_name(name).is_ok();
+                let buttons = footer(ui, p, "Compress", ButtonKind::Primary, valid);
+                submit = valid && confirmed(buttons.confirm);
+                close |= buttons.cancel;
+            });
+            close |= output.backdrop_clicked;
+            if submit && !close {
+                actions.push(Action::Submit(Operation::Compress {
+                    sources: sources.clone(),
+                    destination: destination.clone(),
+                    name: name.clone(),
+                }));
+                close = true;
+            }
+        }
+        Dialog::Extract {
+            archive,
+            destination,
+        } => {
+            let mut submit = false;
+            let output = controls::sheet(
+                ctx,
+                p,
+                "Extract to",
+                500.0,
+                SheetPlacement::Center,
+                |ui| {
+                    close |=
+                        controls::sheet_header(ui, p, "Extract to", Some("Close extract dialog"));
+                    scroll_body(ui, ctx, "extract-body", |ui| {
+                        caption(
+                            ui,
+                            p,
+                            &format!(
+                                "Enter the folder for the contents of “{}”. Use ~ for your home folder.",
+                                super::name(archive)
+                            ),
+                        );
+                        ui.add_space(12.0);
+                        let width = ui.available_width();
+                        let field = controls::text_field(
+                            ui,
+                            p,
+                            Id::new("extract-destination"),
+                            destination,
+                            "~/Documents",
+                            "Destination folder",
+                            width,
+                        );
+                        request_focus(ui, &field, &mut state.focus_dialog);
+                    });
+                    let valid = !destination.trim().is_empty();
+                    let buttons = footer(ui, p, "Extract", ButtonKind::Primary, valid);
+                    submit = valid && confirmed(buttons.confirm);
+                    close |= buttons.cancel;
+                },
+            );
+            close |= output.backdrop_clicked;
+            if submit && !close {
+                actions.push(Action::ExtractTo(archive.clone(), destination.clone()));
+                close = true;
+            }
+        }
         Dialog::Location { value } => {
             let mut submit = false;
             let output = controls::sheet(

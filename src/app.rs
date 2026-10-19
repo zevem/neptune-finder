@@ -425,7 +425,7 @@ impl FinderApp {
                 if directory {
                     self.navigate(target, path, ctx);
                 } else {
-                    self.submit(Operation::Open { path });
+                    self.submit(open_file(path));
                 }
             }
             Action::Back(target, forward) => {
@@ -671,21 +671,42 @@ impl FinderApp {
                 ctx.request_repaint();
             }
             Action::Location(path) => {
-                let text = path.trim();
-                let path = if text == "~" {
-                    self.home.clone()
-                } else if let Some(tail) = text.strip_prefix("~/") {
-                    self.home.join(tail)
-                } else {
-                    let p = PathBuf::from(text);
-                    if p.is_absolute() {
-                        p
-                    } else {
-                        self.workspace.pane().path.join(p)
-                    }
-                };
+                let path = self.location(&path, &self.workspace.pane().path);
                 self.ui.dialog = None;
                 self.navigate(id, path, ctx);
+            }
+            Action::ExtractTo(archive, destination) => {
+                let Some(parent) = archive.parent() else {
+                    return;
+                };
+                // The unchanged suggestion keeps the folder's exact native
+                // path, which a lossy display string cannot round-trip.
+                let destination = if destination.trim() == parent.display().to_string() {
+                    parent.to_owned()
+                } else {
+                    self.location(&destination, parent)
+                };
+                self.ui.dialog = None;
+                self.submit(Operation::Extract {
+                    archive,
+                    destination,
+                });
+            }
+        }
+    }
+    /// A typed folder: `~` for Home, otherwise absolute or relative to `base`.
+    fn location(&self, text: &str, base: &Path) -> PathBuf {
+        let text = text.trim();
+        if text == "~" {
+            self.home.clone()
+        } else if let Some(tail) = text.strip_prefix("~/") {
+            self.home.join(tail)
+        } else {
+            let path = PathBuf::from(text);
+            if path.is_absolute() {
+                path
+            } else {
+                base.join(path)
             }
         }
     }
@@ -725,6 +746,17 @@ impl FinderApp {
             }
         }
         ctx.request_repaint_after(Duration::from_millis(100));
+    }
+}
+/// What opening a file does: a ZIP archive extracts beside itself, as the
+/// system file managers do; anything else opens in its default application.
+fn open_file(path: PathBuf) -> Operation {
+    match path.parent() {
+        Some(parent) if finder_operations::is_extractable(&path) => Operation::Extract {
+            destination: parent.to_owned(),
+            archive: path,
+        },
+        _ => Operation::Open { path },
     }
 }
 fn absolute(path: &Path) -> PathBuf {
@@ -785,5 +817,29 @@ impl eframe::App for FinderApp {
                 .save(self.workspace.snapshot(self.config.clone()));
         }
         self.storage.finish();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn opening_a_zip_archive_extracts_it_beside_itself() {
+        let folder = PathBuf::from(if cfg!(windows) {
+            "C:\\Downloads"
+        } else {
+            "/downloads"
+        });
+        assert!(matches!(
+            open_file(folder.join("Photos.ZIP")),
+            Operation::Extract { archive, destination }
+                if archive == folder.join("Photos.ZIP") && destination == folder
+        ));
+        for name in ["notes.txt", "report.docx", "source.tar.gz"] {
+            assert!(matches!(
+                open_file(folder.join(name)),
+                Operation::Open { path } if path == folder.join(name)
+            ));
+        }
     }
 }

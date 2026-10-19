@@ -15,7 +15,7 @@ requires [native acceptance](verification.md) on the actual operating systems.
 | Component | Owns | Must not own |
 | --- | --- | --- |
 | `finder-core` | Directory snapshots, entry kinds, sorting/filtering, recursive search and item properties | GUI types, GPU resources, native dialogs or interactive frames |
-| `finder-operations` | Copy, move, rename, creation, trash, collision checks and completion reporting | GUI widgets or implicit overwrite decisions |
+| `finder-operations` | Copy, move, rename, creation, trash, ZIP compression/extraction, collision checks and completion reporting | GUI widgets or implicit overwrite decisions |
 | `neptune-finder` desktop | Worker orchestration, navigation/selection model, tabs/panes, bounded previews and thumbnails, native services and settings/session persistence | Blocking filesystem work while painting |
 | `theme.rs`, `icons.rs`, `fonts.rs` | Neptune materials, geometry, typography, official icon fonts and shared controls | Filesystem or operation policy |
 

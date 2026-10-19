@@ -7,5 +7,7 @@ description = "Bounded, recoverable filesystem operations for Neptune Finder"
 license = "MIT"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tempfile = "3.27"
 trash = "5.2.3"
+zip = { version = "9", default-features = false, features = ["chrono", "deflate-flate2-zlib-rs"] }

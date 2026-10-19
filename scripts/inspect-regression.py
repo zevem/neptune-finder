@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import zipfile
 import zlib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -324,6 +325,9 @@ class Review:
                 if not self.scenario("file-operations", self.file_operations):
                     self.close_sheet()
                     self.go(self.directory)
+                if not self.scenario("archives", self.archives):
+                    self.close_sheet()
+                    self.go(self.directory)
                 self.scenario("preferences-and-themes", self.preferences)
                 self.close_sheet()
                 self.call("resize", 1180, 780)
@@ -451,6 +455,59 @@ class Review:
         self.click("Cancel", "button")
         self.check("trash cancellation preserves fixture", renamed.is_dir(), "Confirmation was cancelled; no item was sent to the OS Trash")
         self.go(self.directory, capture="15-location-editor")
+
+    def archives(self):
+        self.go(self.directory)
+        source = self.directory / "Documents"
+        self.row(source.name)
+        self.click(source.name + ", ", prefix=True, secondary=True)
+        self.click("Compress…", "button")
+        self.widget("Close compress dialog", "button")
+        self.shot("15a-compress-dialog")
+        self.call("resize", 480, 420)
+        self.widget("Close compress dialog", "button")
+        self.shot("15b-narrow-compress-dialog")
+        self.call("resize", 1180, 780)
+        self.click("Compress", "button")
+        archive = self.directory / "Documents.zip"
+        self.wait("compressed fixture archive", lambda: archive.is_file() and zipfile.is_zipfile(archive))
+        with zipfile.ZipFile(archive) as contents:
+            names = sorted(contents.namelist())
+        self.check("compress via the context menu", names == ["Documents/", "Documents/Research.txt"], f"Archive entries: {names}")
+        self.dismiss_notice()
+        self.row(archive.name)
+        self.click(archive.name + ", ", prefix=True, secondary=True)
+        self.widget("Extract to…", "button")
+        self.shot("15c-archive-context-menu")
+        # A click outside closes the menu; the file list consumes Escape.
+        self.select(archive.name)
+        self.wait("archive context menu closed", lambda: not self.nodes("Extract to…", "button"))
+        # egui counts clicks within 0.6 s of that one into a triple click.
+        time.sleep(0.7)
+        self.call("double-click", *self.center(self.row(archive.name)))
+        extracted = self.directory / "Documents 2"
+        self.wait("archive extracted beside itself", lambda: (extracted / "Research.txt").is_file())
+        self.row(extracted.name)
+        self.check(
+            "double-click extracts without replacing",
+            (extracted / "Research.txt").read_bytes() == (source / "Research.txt").read_bytes() and archive.is_file(),
+            "The existing folder kept its name; the archive's copy took the next free name",
+        )
+        self.shot("15d-extracted-archive")
+        self.dismiss_notice()
+        self.click(archive.name + ", ", prefix=True, secondary=True)
+        self.click("Extract to…", "button")
+        self.set_field("Destination folder", self.directory / "Destination")
+        self.shot("15e-extract-to-dialog")
+        self.call("resize", 480, 420)
+        self.widget("Close extract dialog", "button")
+        self.shot("15f-narrow-extract-to-dialog")
+        self.call("resize", 1180, 780)
+        self.click("Extract", "button")
+        moved = self.directory / "Destination/Documents/Research.txt"
+        self.wait("archive extracted into the typed folder", moved.is_file)
+        self.check("extract to a typed folder", moved.read_bytes() == (source / "Research.txt").read_bytes(), "Extract to… used the typed destination")
+        self.dismiss_notice()
 
     def preferences(self):
         self.go(self.directory)

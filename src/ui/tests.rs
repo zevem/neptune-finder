@@ -577,6 +577,44 @@ fn a_focused_file_row_opens_previews_and_navigates_the_selected_file() {
 }
 
 #[test]
+fn a_held_enter_opens_the_selected_archive_once() {
+    let mut harness = Harness::new(3);
+    let archive = harness.workspace.pane().path.join("Photos.zip");
+    harness.workspace.pane_mut().entries[0] = Entry {
+        path: archive.clone(),
+        name: "Photos.zip".into(),
+        kind: EntryKind::File,
+        size: 1,
+        modified: Some(SystemTime::UNIX_EPOCH),
+        hidden: false,
+    };
+    harness.workspace.pane_mut().select(0, false, false);
+    harness.warm();
+    let opens = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|action| matches!(action, Action::Open(_, path, false) if path == &archive))
+            .count()
+    };
+    let row = harness.focused_file();
+    let (actions, _) = harness.frame_at(vec![press(Key::Enter)], vec2(1_024.0, 720.0), Some(row));
+    assert_eq!(opens(&actions), 1);
+    for _ in 0..3 {
+        let row = harness.focused_file();
+        let (actions, _) = harness.frame_at(
+            vec![key(Key::Enter, true, true, Modifiers::NONE)],
+            vec2(1_024.0, 720.0),
+            Some(row),
+        );
+        assert_eq!(
+            opens(&actions),
+            0,
+            "a repeated Enter opened the archive again"
+        );
+    }
+}
+
+#[test]
 fn grid_arrow_navigation_uses_the_actual_visible_column_count() {
     let mut harness = Harness::new(50);
     harness.config.view = ViewMode::Grid;
@@ -1126,6 +1164,47 @@ fn a_drag_released_in_its_own_folder_or_on_itself_does_nothing() {
         )),
         "a file dropped on a folder was not copied into it"
     );
+}
+
+#[test]
+fn archive_dialogs_retain_their_original_targets_after_navigation() {
+    let mut harness = Harness::new(3);
+    let folder = harness.workspace.pane().path.clone();
+    let sources = vec![
+        harness.workspace.pane().entries[0].path.clone(),
+        harness.workspace.pane().entries[1].path.clone(),
+    ];
+    harness.state.open_dialog(Dialog::Compress {
+        sources: sources.clone(),
+        destination: folder.clone(),
+        name: "Archive.zip".into(),
+    });
+    harness
+        .workspace
+        .pane_mut()
+        .navigate(folder.join("another-folder"));
+    harness.warm();
+    let (actions, _) = harness.frame(vec![press(Key::Enter)]);
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Submit(Operation::Compress { sources: chosen, destination, name })
+            if chosen == &sources && destination == &folder && name == "Archive.zip")));
+    assert!(harness.state.dialog.is_none());
+    harness.frame(vec![release(Key::Enter)]);
+
+    let archive = folder.join("Photos.zip");
+    harness.state.open_dialog(Dialog::Extract {
+        archive: archive.clone(),
+        destination: "~/Pictures".into(),
+    });
+    harness
+        .workspace
+        .pane_mut()
+        .navigate(folder.join("elsewhere"));
+    harness.warm();
+    let (actions, _) = harness.frame(vec![press(Key::Enter)]);
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::ExtractTo(target, destination) if target == &archive && destination == "~/Pictures")));
+    assert!(harness.state.dialog.is_none());
 }
 
 #[test]

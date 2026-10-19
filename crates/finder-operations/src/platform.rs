@@ -131,6 +131,27 @@ pub(super) fn copy_symlink(_source: &Path, _target: &Path, _metadata: &Metadata)
     ))
 }
 
+/// Create a link to `target`, which an archive names and may not exist.
+#[cfg(unix)]
+pub(super) fn create_symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+/// An archive does not say whether a link names a folder; Windows needs the
+/// symbolic-link privilege or Developer Mode either way.
+#[cfg(windows)]
+pub(super) fn create_symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(super) fn create_symlink(_target: &Path, _link: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "Symbolic link creation is unavailable on this platform",
+    ))
+}
+
 #[cfg(unix)]
 pub(super) fn same_identity(before: &Metadata, after: &Metadata) -> bool {
     use std::os::unix::fs::MetadataExt;
