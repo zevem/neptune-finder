@@ -45,6 +45,14 @@ Select All selects the current result set. Open a selected folder with Enter or
 double-click; files request their operating system's default application. A
 middle click opens a file the same way without changing the selection.
 
+Drag from empty space to draw a selection rectangle: between or below icons,
+below the last row, or anywhere in a list row other than its icon and name. The
+rectangle selects what it crosses and scrolls the pane while dragged past its
+top or bottom. Hold Shift to add to the current selection, or Ctrl (Command on
+macOS) to toggle the items it crosses. Dragging an item by its icon or name
+still drags the selection to another folder. Clicking empty space clears the
+selection.
+
 The context menu offers actions for its target, including creation, rename,
 copy/cut, paste, trash, Quick Look, Copy Path and native reveal. Copy and Cut
 capture the selected paths. Navigate to the destination pane/folder and Paste.

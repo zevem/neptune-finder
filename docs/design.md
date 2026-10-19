@@ -115,7 +115,12 @@ The window is composed as Terminal's is:
   ("PNG image", "Rust source"). Colour is decoration; the kind is always
   written.
 - **Icon view.** Large glyphs over names of up to two lines. Selection backs
-  the glyph with a soft tile and sets the name in an accent capsule.
+  the glyph with a soft tile and sets the name in an accent capsule. Only the
+  glyph and name are the item; the space between items belongs to the folder.
+- **Selection rectangle.** A drag from empty space draws a translucent accent
+  rectangle with a one-pixel accent edge and a 4-point radius, clipped to the
+  pane's files. In list view, a drag from a row's icon or name moves the file
+  and a drag from elsewhere in the row draws the rectangle, as in Finder.
 - **Empty states** are a quiet glyph, a medium 14-point statement and one line
   of explanation, as Terminal says that a search found nothing.
 - **Messages** sit in the window's top trailing corner only when something

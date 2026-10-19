@@ -155,6 +155,7 @@ impl FinderApp {
     fn drain_pane(&mut self, id: u64, ctx: &egui::Context) {
         if let Some(pane) = self.workspace.find_mut(id) {
             let entries = std::mem::take(&mut pane.entries);
+            pane.end_marquee();
             self.retire_entries(id, entries, ctx);
         }
     }
@@ -274,6 +275,7 @@ impl FinderApp {
                         pane.focus_index = focus_path.and_then(|path| {
                             pane.entries.iter().position(|entry| entry.path == path)
                         });
+                        pane.refresh_marquee();
                     }
                     Err(error) => {
                         let obsolete = std::mem::take(&mut pane.entries);

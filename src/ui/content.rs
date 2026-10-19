@@ -6,20 +6,34 @@ use crate::{
     config::{Accent, ColumnWidths, Config, ViewMode},
     controls::{self, ButtonKind},
     icons::{self, Icon},
-    model::{Pane, Workspace},
+    model::{Band, Pane, Workspace},
     theme::{self, Palette, metrics},
 };
 use eframe::egui::{
-    self, Align, Align2, Color32, CursorIcon, Layout, Rect, Response, Sense, Stroke, StrokeKind,
-    UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    self, Align, Align2, Color32, CursorIcon, Galley, Layout, Pos2, Rangef, Rect, Response, Sense,
+    Stroke, StrokeKind, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2,
+    scroll_area::{DragScroll, ScrollSource},
+    style::ScrollAnimation,
+    vec2,
 };
 use finder_core::{Entry, EntryKind, SortField};
 use finder_operations::Operation;
-use std::path::{Path, PathBuf};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 const PATH_BAR: f32 = 30.0;
 const HEADER: f32 = 28.0;
 const SCOPE_BAR: f32 = 40.0;
+/// File views scroll by wheel and scroll bar. A drag in them selects or moves
+/// files, even after egui has seen a touch screen.
+const FILES_SCROLL: ScrollSource = ScrollSource {
+    scroll_bar: true,
+    drag: DragScroll::Never,
+    mouse_wheel: true,
+};
 
 #[derive(Clone)]
 struct FileDrag {
@@ -651,21 +665,38 @@ fn list(
         p.hairline(),
     );
     let today = chrono::Local::now().date_naive();
+    let area = ui.available_rect_before_wrap();
+    let background = files_background(ui, area);
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt(("files-list", pane.id, &pane.path, &pane.query))
-        .auto_shrink([false, false]);
+        .auto_shrink([false, false])
+        .scroll_source(FILES_SCROLL);
     if let Some(index) = pane.scroll_to.take() {
         scroll = scroll.vertical_scroll_offset(index as f32 * config.row_height);
     }
-    let output = scroll.show_rows(ui, config.row_height, pane.entries.len(), |ui, range| {
+    let pitch = config.row_height;
+    let count = pane.entries.len();
+    scroll.show_rows(ui, pitch, count, |ui, range| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        let view = View {
+            origin: ui.max_rect().left_top() - vec2(0.0, range.start as f32 * pitch),
+            area,
+            height: count as f32 * pitch,
+        };
+        // A rectangle covers every row it crosses.
+        let marquee = sweep(ui, pane, &background, &view, |rect| Band {
+            rows: span(rect.y_range(), pitch, Rangef::new(0.0, pitch), count),
+            columns: 0..1,
+            stride: 1,
+        });
+        let mut items = Vec::new();
         for index in range {
             let entry = pane.entries[index].clone();
             let selected = pane.selected.contains(&entry.path);
             ui.push_id(&entry.path, |ui| {
                 let (slot, response) = ui.allocate_exact_size(
                     vec2(ui.available_width(), config.row_height),
-                    Sense::click_and_drag(),
+                    Sense::click(),
                 );
                 response.widget_info(|| {
                     WidgetInfo::selected(
@@ -702,7 +733,14 @@ fn list(
                     if entry.hidden { p.secondary } else { p.fg },
                     columns.name - 40.0,
                 );
-                controls::galley_at(ui.painter(), pos2(rect.left() + 32.0, middle), text);
+                let name =
+                    controls::galley_at(ui.painter(), pos2(rect.left() + 32.0, middle), text);
+                // The glyph and name pick the file up; the rest of the row
+                // starts a rectangle, as in Finder's list view.
+                items.push((
+                    Rect::from_min_max(slot.min, pos2(name.right() + 6.0, slot.bottom())),
+                    index,
+                ));
                 let mut x = rect.left() + columns.name;
                 if columns.date > 0.0 {
                     cell_text(
@@ -743,21 +781,15 @@ fn list(
                 interact(ui, response, pane, (index, &entry), state, p, actions);
             });
         }
-    });
-    let rest = Rect::from_min_max(
-        pos2(
-            output.inner_rect.left(),
-            output.inner_rect.top() + output.content_size.y.min(output.inner_rect.height()),
-        ),
-        output.inner_rect.max,
-    );
-    if rest.is_positive() {
-        let response = ui.interact(rest, ui.id().with("blank-list"), Sense::click());
-        if response.clicked() {
-            pane.selected.clear();
+        begin_drag(ui, pane, &background, view.origin, &items);
+        if let Some(marquee) = marquee {
+            paint_band(ui, area, marquee, p);
         }
-        response.context_menu(|ui| folder_menu(ui, pane, state, p, actions));
+    });
+    if background.clicked() {
+        pane.selected.clear();
     }
+    background.context_menu(|ui| folder_menu(ui, pane, state, p, actions));
 }
 
 fn band(p: Palette) -> Color32 {
@@ -849,7 +881,10 @@ fn grid(
     focused: bool,
     actions: &mut Vec<Action>,
 ) {
+    let body = ui.available_rect_before_wrap();
+    let background = files_background(ui, body);
     ui.add_space(6.0);
+    let area = ui.available_rect_before_wrap();
     let available = ui.available_width() - 12.0;
     let cell_width = (config.icon_size + 56.0).max(96.0);
     let columns = (available / cell_width).floor().max(1.0) as usize;
@@ -859,12 +894,35 @@ fn grid(
     let rows = pane.entries.len().div_ceil(columns);
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt(("files-grid", pane.id, &pane.path, &pane.query))
-        .auto_shrink([false, false]);
+        .auto_shrink([false, false])
+        .scroll_source(FILES_SCROLL);
     if let Some(index) = pane.scroll_to.take() {
         scroll = scroll.vertical_scroll_offset((index / columns) as f32 * height);
     }
-    let output = scroll.show_rows(ui, height, rows, |ui, range| {
+    // A rectangle covers an item where it meets the glyph's column, from the
+    // glyph down through the name, so off-screen rows need no text layout.
+    let tile = grid_tile(
+        Rect::from_min_size(pos2(6.0, 0.0), vec2(width, height)),
+        config.icon_size,
+    );
+    scroll.show_rows(ui, height, rows, |ui, range| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        let view = View {
+            origin: ui.max_rect().left_top() - vec2(0.0, range.start as f32 * height),
+            area,
+            height: rows as f32 * height,
+        };
+        let marquee = sweep(ui, pane, &background, &view, |rect| Band {
+            rows: span(
+                rect.y_range(),
+                height,
+                Rangef::new(tile.top(), height - 6.0),
+                rows,
+            ),
+            columns: span(rect.x_range(), width, tile.x_range(), columns),
+            stride: columns,
+        });
+        let mut items = Vec::new();
         for row in range {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -877,8 +935,19 @@ fn grid(
                     let entry = pane.entries[index].clone();
                     let selected = pane.selected.contains(&entry.path);
                     ui.push_id(&entry.path, |ui| {
-                        let (cell, response) =
-                            ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
+                        let (_, cell) = ui.allocate_space(vec2(width, height));
+                        let item = GridItem::new(
+                            ui.painter(),
+                            cell,
+                            &entry,
+                            config,
+                            selected && focused,
+                            p,
+                        );
+                        // Only the glyph and name answer the pointer; the
+                        // space between items is the folder's.
+                        let bounds = item.tile.union(item.capsule);
+                        let response = ui.interact(bounds, ui.id().with("item"), Sense::click());
                         response.widget_info(|| {
                             WidgetInfo::selected(
                                 WidgetType::SelectableLabel,
@@ -887,89 +956,217 @@ fn grid(
                                 format!("{}, {}", entry.name, entry.kind_label()),
                             )
                         });
-                        grid_cell(ui, &response, cell, &entry, config, selected, focused, p);
+                        item.paint(ui, &response, &entry, selected, focused, p);
+                        items.push((bounds, index));
                         interact(ui, response, pane, (index, &entry), state, p, actions);
                     });
                 }
             });
         }
-    });
-    let rest = Rect::from_min_max(
-        pos2(
-            output.inner_rect.left(),
-            output.inner_rect.top() + output.content_size.y.min(output.inner_rect.height()),
-        ),
-        output.inner_rect.max,
-    );
-    if rest.is_positive() {
-        let response = ui.interact(rest, ui.id().with("blank-grid"), Sense::click());
-        if response.clicked() {
-            pane.selected.clear();
+        begin_drag(ui, pane, &background, view.origin, &items);
+        if let Some(marquee) = marquee {
+            paint_band(ui, area, marquee, p);
         }
-        response.context_menu(|ui| folder_menu(ui, pane, state, p, actions));
+    });
+    if background.clicked() {
+        pane.selected.clear();
     }
+    background.context_menu(|ui| folder_menu(ui, pane, state, p, actions));
+}
+
+fn grid_tile(cell: Rect, size: f32) -> Rect {
+    Rect::from_center_size(
+        pos2(cell.center().x, cell.top() + 8.0 + size * 0.5 + 6.0),
+        Vec2::splat(size + 12.0),
+    )
 }
 
 /// An icon over its name, as the native icon view draws it: selection backs
 /// the icon with a soft tile and sets the name in an accent capsule.
-#[allow(clippy::too_many_arguments)]
-fn grid_cell(
-    ui: &egui::Ui,
-    response: &Response,
-    cell: Rect,
-    entry: &Entry,
-    config: &Config,
-    selected: bool,
-    focused: bool,
-    p: Palette,
-) {
-    let painter = ui.painter();
-    let size = config.icon_size;
-    let tile = Rect::from_center_size(
-        pos2(cell.center().x, cell.top() + 8.0 + size * 0.5 + 6.0),
-        Vec2::splat(size + 12.0),
-    );
-    if selected {
-        painter.rect_filled(tile, 10, p.pressed);
-    } else if response.hovered() {
-        painter.rect_filled(tile, 10, p.hover);
-    }
-    if response.has_focus() {
-        controls::focus_ring(painter, tile, 10, p);
-    }
-    let (icon, ink) = file_icon(entry, p);
-    paint_icon(ui, entry, icon, ink, tile.shrink(6.0), p);
-    let ink = if selected && focused {
-        p.on_accent
-    } else if entry.hidden {
-        p.secondary
-    } else {
-        p.fg
-    };
-    let mut job = egui::text::LayoutJob::simple(
-        entry.name.clone(),
-        theme::regular(12.0),
-        ink,
-        cell.width() - 16.0,
-    );
-    job.halign = Align::Center;
-    job.wrap = egui::text::TextWrapping {
-        max_width: cell.width() - 16.0,
-        max_rows: 2,
-        break_anywhere: true,
-        overflow_character: Some('…'),
-    };
-    let galley = painter.layout_job(job);
-    let origin = pos2(cell.center().x, tile.bottom() + 6.0);
-    if selected {
-        let mut text = galley
+struct GridItem {
+    tile: Rect,
+    name: Arc<Galley>,
+    origin: Pos2,
+    capsule: Rect,
+}
+impl GridItem {
+    fn new(
+        painter: &egui::Painter,
+        cell: Rect,
+        entry: &Entry,
+        config: &Config,
+        accented: bool,
+        p: Palette,
+    ) -> Self {
+        let tile = grid_tile(cell, config.icon_size);
+        let ink = if accented {
+            p.on_accent
+        } else if entry.hidden {
+            p.secondary
+        } else {
+            p.fg
+        };
+        let mut job = egui::text::LayoutJob::simple(
+            entry.name.clone(),
+            theme::regular(12.0),
+            ink,
+            cell.width() - 16.0,
+        );
+        job.halign = Align::Center;
+        job.wrap = egui::text::TextWrapping {
+            max_width: cell.width() - 16.0,
+            max_rows: 2,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        let name = painter.layout_job(job);
+        let origin = pos2(cell.center().x, tile.bottom() + 6.0);
+        let mut capsule = name
             .rect
             .translate(origin.to_vec2())
             .expand2(vec2(6.0, 1.5));
-        text.min.y -= 0.5;
-        painter.rect_filled(text, 5, if focused { p.accent } else { p.pressed });
+        capsule.min.y -= 0.5;
+        Self {
+            tile,
+            name,
+            origin,
+            capsule,
+        }
     }
-    painter.galley(origin, galley, Color32::PLACEHOLDER);
+
+    fn paint(
+        self,
+        ui: &egui::Ui,
+        response: &Response,
+        entry: &Entry,
+        selected: bool,
+        focused: bool,
+        p: Palette,
+    ) {
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(self.tile, 10, p.pressed);
+        } else if response.hovered() {
+            painter.rect_filled(self.tile, 10, p.hover);
+        }
+        if response.has_focus() {
+            controls::focus_ring(painter, self.tile, 10, p);
+        }
+        let (icon, ink) = file_icon(entry, p);
+        paint_icon(ui, entry, icon, ink, self.tile.shrink(6.0), p);
+        if selected {
+            painter.rect_filled(self.capsule, 5, if focused { p.accent } else { p.pressed });
+        }
+        painter.galley(self.origin, self.name, Color32::PLACEHOLDER);
+    }
+}
+
+/// The files' own surface under the rows: a click clears the selection, a
+/// secondary click offers folder actions, and every drag in the file view
+/// begins here, so it outlives rows that scroll away. It takes no focus.
+fn files_background(ui: &egui::Ui, area: Rect) -> Response {
+    ui.interact(
+        area,
+        ui.id().with("files-background"),
+        Sense::CLICK | Sense::DRAG,
+    )
+}
+
+/// Where a file view's content sits: its scrolled top-left on screen, the
+/// visible area and the content's full height.
+struct View {
+    origin: Pos2,
+    area: Rect,
+    height: f32,
+}
+
+/// Which of `count` items along one axis meet `range`, the `k`th spanning
+/// `item` offset by `k * pitch`.
+fn span(range: Rangef, pitch: f32, item: Rangef, count: usize) -> Range<usize> {
+    let first = ((range.min - item.max) / pitch).ceil().max(0.0) as usize;
+    let end = (((range.max - item.min) / pitch).floor() + 1.0).clamp(0.0, count as f32) as usize;
+    first.min(end)..end
+}
+
+/// Carries a selection rectangle to the pointer before the files paint, so
+/// they show what it covers in the same frame, and scrolls while the pointer
+/// is past the top or bottom of the files. Returns the rectangle on screen.
+fn sweep(
+    ui: &egui::Ui,
+    pane: &mut Pane,
+    background: &Response,
+    view: &View,
+    cover: impl Fn(Rect) -> Band,
+) -> Option<Rect> {
+    if !background.dragged() {
+        if pane.marquee_active() {
+            pane.end_marquee();
+            ui.ctx().data_mut(|d| d.remove::<Pos2>(background.id));
+        }
+        return None;
+    }
+    let start = ui
+        .ctx()
+        .data(|d| d.get_temp::<Pos2>(background.id))
+        .filter(|_| pane.marquee_active())?;
+    let pointer = ui.input(|i| i.pointer.interact_pos())?;
+    let band = Rect::from_two_pos(start, pointer - view.origin.to_vec2());
+    pane.marquee_to(cover(band));
+    // Scroll toward a pointer past an edge, faster the further it is.
+    let (top, bottom) = (view.area.top(), view.area.bottom());
+    let beyond = (pointer.y - top).min(0.0) + (pointer.y - bottom).max(0.0);
+    let offset = top - view.origin.y;
+    if beyond < 0.0 && offset > 0.0 || beyond > 0.0 && offset < view.height - view.area.height() {
+        let step = beyond.clamp(-120.0, 120.0) * 12.0 * ui.input(|i| i.stable_dt).min(0.1);
+        ui.scroll_with_delta_animation(vec2(0.0, -step), ScrollAnimation::none());
+    }
+    Some(band.translate(view.origin.to_vec2()))
+}
+
+/// A primary-button drag that starts on an item's glyph or name moves the
+/// selection; one that starts anywhere else in the files draws a selection
+/// rectangle.
+fn begin_drag(
+    ui: &egui::Ui,
+    pane: &mut Pane,
+    background: &Response,
+    origin: Pos2,
+    items: &[(Rect, usize)],
+) {
+    let Some(press) = ui
+        .input(|i| i.pointer.press_origin())
+        .filter(|_| background.drag_started_by(egui::PointerButton::Primary))
+    else {
+        return;
+    };
+    if let Some(&(_, index)) = items.iter().find(|(rect, _)| rect.contains(press)) {
+        if !pane.selected.contains(&pane.entries[index].path) {
+            pane.select(index, false, false);
+        }
+        egui::DragAndDrop::set_payload(
+            ui.ctx(),
+            FileDrag {
+                sources: pane.selected.iter().cloned().collect(),
+            },
+        );
+    } else {
+        let modifiers = ui.input(|i| i.modifiers);
+        pane.begin_marquee(modifiers.shift, modifiers.command || modifiers.ctrl);
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(background.id, press - origin.to_vec2()));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// The selection rectangle, in the accent reserved for selection.
+fn paint_band(ui: &egui::Ui, area: Rect, band: Rect, p: Palette) {
+    ui.painter_at(area).rect(
+        band,
+        4,
+        theme::tint(p.accent, if p.dark { 0.16 } else { 0.12 }),
+        Stroke::new(1.0, theme::tint(p.accent, 0.8)),
+        StrokeKind::Inside,
+    );
 }
 
 fn row_surface(
@@ -1200,17 +1397,6 @@ fn interact(
         } else {
             Action::Open(pane.id, entry.path.clone(), false)
         });
-    }
-    if response.drag_started() {
-        if !pane.selected.contains(&entry.path) {
-            pane.select(index, false, false);
-        }
-        egui::DragAndDrop::set_payload(
-            ui.ctx(),
-            FileDrag {
-                sources: pane.selected.iter().cloned().collect(),
-            },
-        );
     }
     if entry.is_dir() {
         if response
