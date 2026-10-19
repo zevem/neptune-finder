@@ -126,8 +126,10 @@ The window is composed as Terminal's is:
   hairline edge when opaque so a light picture keeps its shape on a light pane.
 - **Selection rectangle.** A drag from empty space draws a translucent accent
   rectangle with a one-pixel accent edge and a 4-point radius, clipped to the
-  pane's files. In list view, a drag from a row's icon or name moves the file
-  and a drag from elsewhere in the row draws the rectangle, as in Finder.
+  pane's files. In list view, a drag from a row's icon or name, or from
+  anywhere on a selected row's highlight, moves the files, as an icon's tile
+  and name do; a drag from elsewhere in an unselected row draws the
+  rectangle, as in Finder.
 - **Dragging files.** The item picked up rides on a 56-point `elevated` card
   with a hairline border and popup shadow, 12 points after and 14 below the
   pointer, slightly translucent. A further card shows 5 points behind it for
