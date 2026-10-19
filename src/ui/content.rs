@@ -561,8 +561,8 @@ fn list(
     // the columns stood when it was pressed, so dragging back undoes a push,
     // and in whole physical pixels.
     let pixels = ui.ctx().pixels_per_point();
-    for right in 1..COLUMNS.len() {
-        let id = ui.id().with(("resize", COLUMNS[right].1));
+    for (right, &(_, label, _, _)) in COLUMNS.iter().enumerate().skip(1) {
+        let id = ui.id().with(("resize", label));
         if ui.ctx().drag_started_id() == Some(id) {
             let origin = ui.input(|i| i.pointer.press_origin().map(|pos| pos.x));
             if let Some(origin) = origin {
@@ -602,7 +602,7 @@ fn list(
     // Each divider trades width between the columns either side of it. The
     // widths are saved on release, and a double click restores the defaults.
     // Dividers have no keyboard behaviour, so they stay out of the focus order.
-    for right in 1..COLUMNS.len() {
+    for (right, &(_, label, _, _)) in COLUMNS.iter().enumerate().skip(1) {
         if widths[right] <= 0.0 {
             continue;
         }
@@ -611,7 +611,7 @@ fn list(
         let resize = ui
             .interact(
                 Rect::from_center_size(pos2(x, head.center().y), vec2(8.0, HEADER)),
-                ui.id().with(("resize", COLUMNS[right].1)),
+                ui.id().with(("resize", label)),
                 Sense::CLICK | Sense::DRAG,
             )
             .on_hover_and_drag_cursor(CursorIcon::ResizeHorizontal);
