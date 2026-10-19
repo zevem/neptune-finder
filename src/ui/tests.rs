@@ -578,7 +578,7 @@ fn a_drag_released_in_its_own_folder_or_on_itself_does_nothing() {
         actions.iter().any(|action| matches!(
             action,
             Action::Submit(Operation::Copy { sources, destination })
-                if sources == &[source.clone()] && destination == &folder
+                if sources == std::slice::from_ref(&source) && destination == &folder
         )),
         "a file dropped on a folder was not copied into it"
     );
