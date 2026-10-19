@@ -128,6 +128,16 @@ The window is composed as Terminal's is:
   rectangle with a one-pixel accent edge and a 4-point radius, clipped to the
   pane's files. In list view, a drag from a row's icon or name moves the file
   and a drag from elsewhere in the row draws the rectangle, as in Finder.
+- **Dragging files.** The item picked up rides on a 56-point `elevated` card
+  with a hairline border and popup shadow, 12 points after and 14 below the
+  pointer, slightly translucent. A further card shows 5 points behind it for
+  each additional item, up to two. Several items add an accent count capsule
+  on the card's top trailing corner. While the drop would copy, a green plus
+  marks its bottom leading corner. A folder that would take the drop is tinted
+  and outlined in the accent.
+- **Cut items** draw their glyph, thumbnail and name at 45% opacity until they
+  are pasted or the clipboard changes. The selection tile behind them keeps
+  its full strength.
 - **Empty states** are a quiet glyph, a medium 14-point statement and one line
   of explanation, as Terminal says that a search found nothing.
 - **Messages** sit in the window's top trailing corner only when something

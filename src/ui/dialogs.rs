@@ -1165,7 +1165,7 @@ fn properties(
     let (_, glyph) = ui.allocate_space(vec2(width, 64.0));
     let (icon, ink) = super::content::file_icon(entry, p);
     super::content::paint_icon(
-        ui,
+        ui.painter(),
         entry,
         icon,
         ink,

@@ -56,14 +56,21 @@ Drag from empty space to draw a selection rectangle: between or below icons,
 below the last row, or anywhere in a list row other than its icon and name. The
 rectangle selects what it crosses and scrolls the pane while dragged past its
 top or bottom. Hold Shift to add to the current selection, or Ctrl (Command on
-macOS) to toggle the items it crosses. Dragging an item by its icon or name
-still drags the selection to another folder. Clicking empty space clears the
+macOS) to toggle the items it crosses. Clicking empty space clears the
 selection.
+
+Dragging an item by its icon or name picks up the selection; a picture of it,
+with the number of items, follows the pointer. Dropping it on a folder or on
+the other pane moves the items there. Hold Ctrl (Option on macOS) while
+dropping to copy them instead. Escape cancels the drag. Files dropped from
+other applications are copied.
 
 The context menu offers actions for its target, including creation, rename,
 copy/cut, paste, trash, Quick Look, Copy Path, Properties and native reveal.
-Copy and Cut capture the selected paths. Navigate to the destination
-pane/folder and Paste. The current file clipboard is local to Neptune Finder;
+Copy and Cut capture the selected paths; cut items appear faded until they are
+pasted or something else is copied or cut. Navigate to the destination
+pane/folder and Paste: copied items are copied there and cut items are moved
+there. The current file clipboard is local to Neptune Finder;
 Copy Path writes text to the system clipboard. Cross-application native file
 clipboard integration is a remaining release requirement.
 

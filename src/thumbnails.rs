@@ -443,6 +443,11 @@ impl Cache {
         }
     }
 
+    /// The picture already uploaded for `entry`, without asking for one.
+    pub fn peek(&self, entry: &Entry) -> Option<&Texture> {
+        self.slots.get(&entry.path)?.texture.as_ref()
+    }
+
     pub fn insert(&mut self, ctx: &egui::Context, thumbnail: Thumbnail) {
         let bytes = thumbnail
             .picture

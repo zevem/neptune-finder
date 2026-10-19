@@ -38,10 +38,17 @@ const FILES_SCROLL: ScrollSource = ScrollSource {
     mouse_wheel: true,
 };
 
+/// Files being dragged, and the one picked up, which the picture under the
+/// pointer shows.
 #[derive(Clone)]
 struct FileDrag {
     sources: Vec<PathBuf>,
+    grabbed: Entry,
 }
+/// The side of the card that carries a dragged item under the pointer.
+const DRAG_CARD: f32 = 56.0;
+/// How solid cut items are until they are pasted.
+const CUT_OPACITY: f32 = 0.45;
 
 pub fn panes(
     ui: &mut egui::Ui,
@@ -91,11 +98,7 @@ pub fn panes(
             && ui.rect_contains_pointer(rect)
             && ui.input(|i| i.pointer.any_released())
             && let Some(payload) = egui::DragAndDrop::take_payload::<FileDrag>(ui.ctx())
-            && let Some(operation) = transfer(
-                &payload.sources,
-                &pane.path,
-                ui.input(|i| i.modifiers.shift),
-            )
+            && let Some(operation) = transfer(&payload.sources, &pane.path, copies(ui))
         {
             actions.push(Action::Submit(operation));
         }
@@ -110,10 +113,12 @@ pub fn panes(
                 Vec::new()
             }
         });
-        if let Some(operation) = transfer(&external, &pane.path, false) {
+        // Files dropped from another application are copied.
+        if let Some(operation) = transfer(&external, &pane.path, true) {
             actions.push(Action::Submit(operation));
         }
     }
+    drag_preview(ui, state, p);
 }
 
 /// Each pane's surface in the stage, side by side with a gutter between.
@@ -718,8 +723,10 @@ fn list(
                 let middle = rect.center().y;
                 let (icon, ink) = file_icon(&entry, p);
                 let icon_size = (config.row_height - 10.0).clamp(14.0, 20.0);
+                // A cut item's glyph and name fade until it is pasted.
+                let item = item_painter(ui, state, &entry);
                 paint_icon(
-                    ui,
+                    &item,
                     &entry,
                     icon,
                     ink,
@@ -730,14 +737,13 @@ fn list(
                     p,
                 );
                 let text = controls::elided(
-                    ui.painter(),
+                    &item,
                     &entry.name,
                     theme::regular(13.0),
                     if entry.hidden { p.secondary } else { p.fg },
                     columns.name - 40.0,
                 );
-                let name =
-                    controls::galley_at(ui.painter(), pos2(rect.left() + 32.0, middle), text);
+                let name = controls::galley_at(&item, pos2(rect.left() + 32.0, middle), text);
                 // The glyph and name pick the file up; the rest of the row
                 // starts a rectangle, as in Finder's list view.
                 items.push((
@@ -960,8 +966,11 @@ fn grid(
                                 format!("{}, {}", entry.name, entry.kind_label()),
                             )
                         });
+                        let glyph = item_painter(ui, state, &entry);
                         let thumbnail = state.thumbnails.get(&entry, pixels);
-                        item.paint(ui, &response, &entry, thumbnail, selected, focused, p);
+                        item.paint(
+                            ui, &glyph, &response, &entry, thumbnail, selected, focused, p,
+                        );
                         items.push((bounds, index));
                         interact(ui, response, pane, (index, &entry), state, p, actions);
                     });
@@ -1040,10 +1049,13 @@ impl GridItem {
         }
     }
 
+    /// Paints the item: its tile and focus with `ui`, and its glyph and name
+    /// with `item`, which fades them while the item is cut.
     #[allow(clippy::too_many_arguments)]
     fn paint(
         self,
         ui: &egui::Ui,
+        item: &egui::Painter,
         response: &Response,
         entry: &Entry,
         thumbnail: Option<&Texture>,
@@ -1061,15 +1073,15 @@ impl GridItem {
             controls::focus_ring(painter, self.tile, 10, p);
         }
         if let Some(thumbnail) = thumbnail {
-            paint_thumbnail(ui, entry, thumbnail, self.tile.shrink(6.0), p);
+            paint_thumbnail(item, entry, thumbnail, self.tile.shrink(6.0), p);
         } else {
             let (icon, ink) = file_icon(entry, p);
-            paint_icon(ui, entry, icon, ink, self.tile.shrink(6.0), p);
+            paint_icon(item, entry, icon, ink, self.tile.shrink(6.0), p);
         }
         if selected {
-            painter.rect_filled(self.capsule, 5, if focused { p.accent } else { p.pressed });
+            item.rect_filled(self.capsule, 5, if focused { p.accent } else { p.pressed });
         }
-        painter.galley(self.origin, self.name, Color32::PLACEHOLDER);
+        item.galley(self.origin, self.name, Color32::PLACEHOLDER);
     }
 }
 
@@ -1159,6 +1171,7 @@ fn begin_drag(
             ui.ctx(),
             FileDrag {
                 sources: pane.selected.iter().cloned().collect(),
+                grabbed: pane.entries[index].clone(),
             },
         );
     } else {
@@ -1235,7 +1248,7 @@ pub(super) fn file_icon(entry: &Entry, p: Palette) -> (Icon, Color32) {
 }
 
 pub(super) fn paint_icon(
-    ui: &egui::Ui,
+    painter: &egui::Painter,
     entry: &Entry,
     icon: Icon,
     ink: Color32,
@@ -1243,7 +1256,7 @@ pub(super) fn paint_icon(
     p: Palette,
 ) {
     icons::paint(
-        ui.painter(),
+        painter,
         rect,
         icon,
         if entry.hidden {
@@ -1252,14 +1265,93 @@ pub(super) fn paint_icon(
             ink
         },
     );
-    link_badge(ui, entry, rect, p);
+    link_badge(painter, entry, rect, p);
+}
+
+/// The painter for an item's glyph and name, faded while it is cut.
+fn item_painter(ui: &egui::Ui, state: &UiState, entry: &Entry) -> egui::Painter {
+    let mut painter = ui.painter().clone();
+    if state.cut.contains(&entry.path) {
+        painter.multiply_opacity(CUT_OPACITY);
+    }
+    painter
+}
+
+/// The picture that follows the pointer while files are dragged: the item
+/// picked up on a card, a card behind it for each further item up to two,
+/// how many items there are, and a plus while dropping would copy them.
+fn drag_preview(ui: &egui::Ui, state: &UiState, p: Palette) {
+    let ctx = ui.ctx();
+    let Some(drag) = egui::DragAndDrop::payload::<FileDrag>(ctx) else {
+        return;
+    };
+    let Some(pointer) = ctx
+        .input(|i| i.pointer.latest_pos())
+        .filter(|_| !ctx.input(|i| i.pointer.any_released()))
+    else {
+        return;
+    };
+    // A painter, not a widget: the picture never takes the pointer from the
+    // folder under it.
+    let mut painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("file-drag-preview"),
+    ));
+    painter.multiply_opacity(0.92);
+    let count = drag.sources.len();
+    let front = Rect::from_min_size(pointer + vec2(12.0, 14.0), Vec2::splat(DRAG_CARD));
+    let cards = count.clamp(1, 3);
+    let step = |depth: usize| front.translate(Vec2::splat(depth as f32 * 5.0));
+    painter.add(p.popup_shadow().as_shape(front.union(step(cards - 1)), 10));
+    for depth in (0..cards).rev() {
+        painter.rect(
+            step(depth),
+            10,
+            p.elevated,
+            Stroke::new(1.0, p.border),
+            StrokeKind::Inside,
+        );
+    }
+    let glyph = front.shrink(8.0);
+    if let Some(thumbnail) = state.thumbnails.peek(&drag.grabbed) {
+        paint_thumbnail(&painter, &drag.grabbed, thumbnail, glyph, p);
+    } else {
+        let (icon, ink) = file_icon(&drag.grabbed, p);
+        paint_icon(&painter, &drag.grabbed, icon, ink, glyph, p);
+    }
+    if count > 1 {
+        let number = painter.layout_no_wrap(count.to_string(), theme::medium(11.0), p.on_accent);
+        let badge = Rect::from_center_size(
+            front.right_top() + vec2(-2.0, 2.0),
+            vec2((number.size().x + 10.0).max(20.0), 20.0),
+        );
+        painter.rect_filled(badge, 10, p.accent);
+        painter.galley(
+            badge.center() - number.size() * 0.5,
+            number,
+            Color32::PLACEHOLDER,
+        );
+    }
+    if copies(ui) {
+        let badge =
+            Rect::from_center_size(front.left_bottom() + vec2(2.0, -2.0), Vec2::splat(20.0));
+        painter.circle_filled(badge.center(), 10.0, p.green);
+        icons::paint(&painter, badge.shrink(4.0), Icon::Plus, Color32::WHITE);
+        ctx.set_cursor_icon(CursorIcon::Copy);
+    }
 }
 
 /// The file's picture centred in the icon's square, never enlarged past its
 /// own pixels. Opaque pictures get a hairline edge so a light picture keeps
 /// its shape on a light pane.
-fn paint_thumbnail(ui: &egui::Ui, entry: &Entry, thumbnail: &Texture, rect: Rect, p: Palette) {
-    let pixels_per_point = ui.ctx().pixels_per_point();
+fn paint_thumbnail(
+    painter: &egui::Painter,
+    entry: &Entry,
+    thumbnail: &Texture,
+    rect: Rect,
+    p: Palette,
+) {
+    let pixels_per_point = painter.pixels_per_point();
     let natural = thumbnail.handle.size_vec2() / pixels_per_point;
     let scale = (rect.width() / natural.x)
         .min(rect.height() / natural.y)
@@ -1275,7 +1367,6 @@ fn paint_thumbnail(ui: &egui::Ui, entry: &Entry, thumbnail: &Texture, rect: Rect
     } else {
         Color32::WHITE
     };
-    let painter = ui.painter();
     painter.add(
         egui::epaint::RectShape::filled(picture, 3, tint).with_texture(
             thumbnail.handle.id(),
@@ -1287,23 +1378,22 @@ fn paint_thumbnail(ui: &egui::Ui, entry: &Entry, thumbnail: &Texture, rect: Rect
     }
     // The badge sits on the picture's corner, at the icon's badge size.
     link_badge(
-        ui,
+        painter,
         entry,
         Rect::from_min_max(picture.right_bottom() - rect.size(), picture.right_bottom()),
         p,
     );
 }
 
-fn link_badge(ui: &egui::Ui, entry: &Entry, rect: Rect, p: Palette) {
+fn link_badge(painter: &egui::Painter, entry: &Entry, rect: Rect, p: Palette) {
     if matches!(entry.kind, EntryKind::Symlink | EntryKind::DirectoryLink) {
         let badge = Rect::from_center_size(
             rect.right_bottom() - vec2(rect.width() * 0.12, rect.height() * 0.12),
             Vec2::splat(rect.width() * 0.5),
         );
-        ui.painter()
-            .circle_filled(badge.center(), badge.width() * 0.42, p.bg);
+        painter.circle_filled(badge.center(), badge.width() * 0.42, p.bg);
         icons::paint(
-            ui.painter(),
+            painter,
             badge.shrink(badge.width() * 0.12),
             Icon::ArrowUpRight,
             p.fg,
@@ -1480,11 +1570,7 @@ fn interact(
         // Releasing over a folder always takes the drag, so a refused drop
         // cannot fall through to the pane's own folder.
         if let Some(payload) = response.dnd_release_payload::<FileDrag>()
-            && let Some(operation) = transfer(
-                &payload.sources,
-                &entry.path,
-                ui.input(|i| i.modifiers.shift),
-            )
+            && let Some(operation) = transfer(&payload.sources, &entry.path, copies(ui))
         {
             actions.push(Action::Submit(operation));
         }
@@ -1655,9 +1741,22 @@ fn lives_in(source: &Path, folder: &Path) -> bool {
     source.parent() == Some(folder)
 }
 
+/// Whether a drop copies its items rather than moving them: while Ctrl is
+/// held, or Option on macOS, as the native file managers choose.
+fn copies(ui: &egui::Ui) -> bool {
+    ui.input(|i| {
+        if cfg!(target_os = "macos") {
+            i.modifiers.alt
+        } else {
+            i.modifiers.ctrl
+        }
+    })
+}
+
 /// The operation a drop on `destination` asks for, without the items that
-/// are already there; `None` when it would do nothing.
-fn transfer(sources: &[PathBuf], destination: &Path, moving: bool) -> Option<Operation> {
+/// are already there; `None` when it would do nothing. A drop moves its
+/// items unless it `copies` them.
+fn transfer(sources: &[PathBuf], destination: &Path, copies: bool) -> Option<Operation> {
     if !accepts_drop(sources, destination) {
         return None;
     }
@@ -1667,13 +1766,13 @@ fn transfer(sources: &[PathBuf], destination: &Path, moving: bool) -> Option<Ope
         .cloned()
         .collect();
     let destination = destination.to_owned();
-    Some(if moving {
-        Operation::Move {
+    Some(if copies {
+        Operation::Copy {
             sources,
             destination,
         }
     } else {
-        Operation::Copy {
+        Operation::Move {
             sources,
             destination,
         }

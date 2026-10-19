@@ -101,6 +101,37 @@ fn parse_key(arguments: &[String]) -> Result<(Key, Modifiers)> {
     Ok((key.context("provide a key or chord")?, modifiers))
 }
 
+/// A key press as the native window reports it. egui-winit turns the
+/// clipboard chords into Cut, Copy and Paste events instead of pressed keys,
+/// and Paste carries the system clipboard's text. This client reads no
+/// clipboard, so it presses Paste as with nothing on it: no event until the
+/// key is released.
+fn key_press(key: Key, modifiers: Modifiers) -> Option<Event> {
+    let windows = cfg!(target_os = "windows");
+    let command = |letter| modifiers.command && key == letter;
+    if key == Key::Cut || command(Key::X) || (windows && modifiers.shift && key == Key::Delete) {
+        Some(Event::Cut)
+    } else if key == Key::Copy
+        || command(Key::C)
+        || (windows && modifiers.ctrl && key == Key::Insert)
+    {
+        Some(Event::Copy)
+    } else if key == Key::Paste
+        || command(Key::V)
+        || (windows && modifiers.shift && key == Key::Insert)
+    {
+        None
+    } else {
+        Some(Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        })
+    }
+}
+
 fn number<T: std::str::FromStr>(argument: &str, name: &str) -> Result<T> {
     argument
         .parse()
@@ -159,16 +190,11 @@ fn main() -> Result<()> {
         }
         "key" => {
             let (key, modifiers) = parse_key(&arguments)?;
-            client.events(vec![
-                Event::ModifiersChanged(modifiers),
-                Event::Key {
-                    key,
-                    physical_key: Some(key),
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                },
-            ])?;
+            client.events(
+                std::iter::once(Event::ModifiersChanged(modifiers))
+                    .chain(key_press(key, modifiers))
+                    .collect(),
+            )?;
             client.events(vec![
                 Event::Key {
                     key,
@@ -355,6 +381,33 @@ mod tests {
         let (key, modifiers) = parse_key(&["Comma".into(), "--cmd".into()]).unwrap();
         assert_eq!(key, Key::Comma);
         assert!(modifiers.mac_cmd && modifiers.command);
+    }
+
+    #[test]
+    fn clipboard_chords_arrive_as_the_native_window_reports_them() {
+        let press = |chord: &str| {
+            let (key, modifiers) = parse_key(&[chord.into()]).unwrap();
+            key_press(key, modifiers)
+        };
+        assert!(matches!(press("ctrl+x"), Some(Event::Cut)));
+        assert!(matches!(press("cmd+c"), Some(Event::Copy)));
+        assert!(press("ctrl+v").is_none());
+        assert!(matches!(
+            press("ctrl+a"),
+            Some(Event::Key {
+                key: Key::A,
+                pressed: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            press("x"),
+            Some(Event::Key {
+                key: Key::X,
+                pressed: true,
+                ..
+            })
+        ));
     }
 
     #[test]

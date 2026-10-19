@@ -312,7 +312,7 @@ impl FinderApp {
                     .as_ref()
                     .is_some_and(|(current, cut)| *cut && current == &paths)
             {
-                self.clipboard = None;
+                self.set_clipboard(None);
             }
             // Finished work shows in the files themselves; only a failure
             // needs a message.
@@ -381,7 +381,16 @@ impl FinderApp {
             }
         }
         self.ui.busy = self.busy.len();
-        self.ui.can_paste = self.clipboard.is_some();
+    }
+    /// Holds paths for Paste, to move them when cut. Cut items show faded
+    /// until the clipboard changes.
+    fn set_clipboard(&mut self, clipboard: Option<(Vec<PathBuf>, bool)>) {
+        self.ui.cut = match &clipboard {
+            Some((paths, true)) => paths.iter().cloned().collect(),
+            _ => HashSet::new(),
+        };
+        self.ui.can_paste = clipboard.is_some();
+        self.clipboard = clipboard;
     }
     fn navigate(&mut self, id: u64, path: PathBuf, ctx: &egui::Context) {
         self.drain_pane(id, ctx);
@@ -571,7 +580,7 @@ impl FinderApp {
             }
             Action::Copy(selected, cut) => {
                 if !selected.is_empty() {
-                    self.clipboard = Some((selected, cut));
+                    self.set_clipboard(Some((selected, cut)));
                 }
             }
             Action::Paste(destination) => {

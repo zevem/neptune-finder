@@ -448,6 +448,32 @@ class Review:
         self.dismiss_notice()
         self.shot("13-copy-destination")
         self.go(self.directory)
+        notes = self.directory / "Notes.txt"
+        self.select(notes.name)
+        self.command("x")
+        self.shot("13a-cut-item")
+        self.go(self.directory / "Projects")
+        self.command("v")
+        pasted = self.directory / "Projects" / notes.name
+        self.wait("cut fixture file moved", lambda: pasted.is_file() and not notes.exists())
+        self.row(notes.name)
+        self.check("cut and paste moves", pasted.is_file() and not notes.exists(), "The pasted item left its original folder")
+        self.dismiss_notice()
+        self.go(self.directory)
+        welcome = self.directory / "Welcome.md"
+        source = self.row(welcome.name)["properties"]["bounds"]
+        target = self.row("Pictures")["properties"]["bounds"]
+        # Files are picked up by their icon or name, at the row's leading edge.
+        grab = (source["x0"] + 30, (source["y0"] + source["y1"]) / 2)
+        over = (target["x0"] + 30, (target["y0"] + target["y1"]) / 2)
+        self.call("press", *grab)
+        self.call("move", *over)
+        self.shot("13b-dragging-onto-folder")
+        self.call("release", *over)
+        dropped = self.directory / "Pictures" / welcome.name
+        self.wait("dragged fixture file moved", lambda: dropped.is_file() and not welcome.exists())
+        self.check("drag onto a folder moves", dropped.is_file() and not welcome.exists(), "The dropped item left its original folder")
+        self.dismiss_notice()
         self.select(renamed.name)
         self.key("Delete")
         self.widget("Move to Trash", "button")
