@@ -17,7 +17,8 @@ retaining the exact materials, typography, icon glyphs and control geometry.
 - **Every control is reachable and named.** Icon-only controls have accessible
   names and tooltips; editable paths and dialogs retain keyboard ownership.
 - **Actions keep their target.** File operations retain the sources selected
-  when the action was created and expose loading/busy, success and failure.
+  when the action was created and expose loading/busy and failure; success
+  shows in the files themselves.
 
 ## Materials and colour
 
@@ -112,9 +113,10 @@ The window is composed as Terminal's is:
   the glyph with a soft tile and sets the name in an accent capsule.
 - **Empty states** are a quiet glyph, a medium 14-point statement and one line
   of explanation, as Terminal says that a search found nothing.
-- **Messages** sit in the window's top trailing corner: a green check for work
-  done and an informational mark leave by themselves after four seconds; a
-  problem keeps its red mark until dismissed.
+- **Messages** sit in the window's top trailing corner only when something
+  needs attention. Finished work shows in the files themselves, and a drag
+  released where it began does nothing. An informational mark leaves by
+  itself after four seconds; a problem keeps its red mark until dismissed.
 - **Preferences.** Terminal's arrangement: a source list (General,
   Appearance, Files) concentric with the sheet beside one pane of labelled
   cards whose controls trail their rows. Themes are miniatures drawn in their

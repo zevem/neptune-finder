@@ -293,12 +293,13 @@ impl FinderApp {
             {
                 self.clipboard = None;
             }
-            self.ui.notice = Some(match result.result {
-                Ok(message) => ui::Notice::done(message),
-                Err(error) => {
-                    ui::Notice::problem(format!("Operation could not be completed: {error}"))
-                }
-            });
+            // Finished work shows in the files themselves; only a failure
+            // needs a message.
+            if let Err(error) = result.result {
+                self.ui.notice = Some(ui::Notice::problem(format!(
+                    "Operation could not be completed: {error}"
+                )));
+            }
             if self.mutations.remove(&result.id) {
                 self.reload_visible(ctx);
             }
@@ -535,36 +536,41 @@ impl FinderApp {
             }
             Action::Copy(selected, cut) => {
                 if !selected.is_empty() {
-                    self.ui.notice = Some(ui::Notice::info(format!(
-                        "{} item{} {}. Choose a folder and paste.",
-                        selected.len(),
-                        if selected.len() == 1 { "" } else { "s" },
-                        if cut { "cut" } else { "copied" }
-                    )));
                     self.clipboard = Some((selected, cut));
                 }
             }
             Action::Paste(destination) => {
-                if let Some((sources, cut)) = self.clipboard.clone() {
-                    if cut && self.pending_cut.values().any(|pending| pending == &sources) {
-                        self.ui.notice = Some(ui::Notice::info("That move is already queued."));
-                    } else {
-                        let paths = sources.clone();
-                        if let Some(id) = self.submit(if cut {
-                            Operation::Move {
-                                sources,
-                                destination,
-                            }
-                        } else {
-                            Operation::Copy {
-                                sources,
-                                destination,
-                            }
-                        }) && cut
-                        {
-                            self.pending_cut.insert(id, paths);
-                        }
+                let Some((paths, cut)) = self.clipboard.clone() else {
+                    return;
+                };
+                if cut && self.pending_cut.values().any(|pending| pending == &paths) {
+                    self.ui.notice = Some(ui::Notice::info("That move is already queued."));
+                    return;
+                }
+                let operation = if cut {
+                    // Cut items pasted into their own folder are already in place.
+                    let sources: Vec<_> = paths
+                        .iter()
+                        .filter(|source| source.parent() != Some(destination.as_path()))
+                        .cloned()
+                        .collect();
+                    if sources.is_empty() {
+                        return;
                     }
+                    Operation::Move {
+                        sources,
+                        destination,
+                    }
+                } else {
+                    Operation::Copy {
+                        sources: paths.clone(),
+                        destination,
+                    }
+                };
+                if let Some(id) = self.submit(operation)
+                    && cut
+                {
+                    self.pending_cut.insert(id, paths);
                 }
             }
             Action::CopyPath(path) => ctx.copy_text(path.to_string_lossy().into_owned()),

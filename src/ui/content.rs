@@ -75,12 +75,13 @@ pub fn panes(
             && ui.rect_contains_pointer(rect)
             && ui.input(|i| i.pointer.any_released())
             && let Some(payload) = egui::DragAndDrop::take_payload::<FileDrag>(ui.ctx())
-        {
-            actions.push(Action::Submit(transfer(
-                payload.sources.clone(),
-                pane.path.clone(),
+            && let Some(operation) = transfer(
+                &payload.sources,
+                &pane.path,
                 ui.input(|i| i.modifiers.shift),
-            )));
+            )
+        {
+            actions.push(Action::Submit(operation));
         }
         let external = ui.input(|i| {
             if rect.contains(i.pointer.hover_pos().unwrap_or_default()) {
@@ -93,11 +94,8 @@ pub fn panes(
                 Vec::new()
             }
         });
-        if !external.is_empty() {
-            actions.push(Action::Submit(Operation::Copy {
-                sources: external,
-                destination: pane.path.clone(),
-            }));
+        if let Some(operation) = transfer(&external, &pane.path, false) {
+            actions.push(Action::Submit(operation));
         }
     }
 }
@@ -1063,7 +1061,10 @@ fn interact(
         );
     }
     if entry.is_dir() {
-        if response.dnd_hover_payload::<FileDrag>().is_some() {
+        if response
+            .dnd_hover_payload::<FileDrag>()
+            .is_some_and(|payload| accepts_drop(&payload.sources, &entry.path))
+        {
             ui.painter().rect_filled(
                 response.rect.shrink2(vec2(6.0, 0.0)),
                 6,
@@ -1076,12 +1077,16 @@ fn interact(
                 StrokeKind::Inside,
             );
         }
-        if let Some(payload) = response.dnd_release_payload::<FileDrag>() {
-            actions.push(Action::Submit(transfer(
-                payload.sources.clone(),
-                entry.path.clone(),
+        // Releasing over a folder always takes the drag, so a refused drop
+        // cannot fall through to the pane's own folder.
+        if let Some(payload) = response.dnd_release_payload::<FileDrag>()
+            && let Some(operation) = transfer(
+                &payload.sources,
+                &entry.path,
                 ui.input(|i| i.modifiers.shift),
-            )));
+            )
+        {
+            actions.push(Action::Submit(operation));
         }
     }
     response.clone().on_hover_text(if pane.recursive {
@@ -1190,8 +1195,32 @@ fn interact(
     });
 }
 
-fn transfer(sources: Vec<PathBuf>, destination: PathBuf, moving: bool) -> Operation {
-    if moving {
+/// Whether dropping these items on `destination` would do anything. A folder
+/// is no target for itself or anything inside it, and items already in the
+/// destination stay where they are, so a drag released where it began (as a
+/// slow click is) does nothing rather than reporting a collision.
+fn accepts_drop(sources: &[PathBuf], destination: &Path) -> bool {
+    !sources.iter().any(|source| destination.starts_with(source))
+        && sources.iter().any(|source| !lives_in(source, destination))
+}
+
+fn lives_in(source: &Path, folder: &Path) -> bool {
+    source.parent() == Some(folder)
+}
+
+/// The operation a drop on `destination` asks for, without the items that
+/// are already there; `None` when it would do nothing.
+fn transfer(sources: &[PathBuf], destination: &Path, moving: bool) -> Option<Operation> {
+    if !accepts_drop(sources, destination) {
+        return None;
+    }
+    let sources = sources
+        .iter()
+        .filter(|source| !lives_in(source, destination))
+        .cloned()
+        .collect();
+    let destination = destination.to_owned();
+    Some(if moving {
         Operation::Move {
             sources,
             destination,
@@ -1201,7 +1230,7 @@ fn transfer(sources: Vec<PathBuf>, destination: PathBuf, moving: bool) -> Operat
             sources,
             destination,
         }
-    }
+    })
 }
 
 fn blank_menu(
